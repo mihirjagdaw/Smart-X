@@ -1,1 +1,5 @@
-<Solution />
+<Solution>
+  <Project Path="Smart-X.Api/Smart-X.Api.csproj" />
+  <Project Path="Smart-X.Client/Smart-X.Client.csproj" />
+  <Project Path="Smart-X.Shared/Smart-X.Shared.csproj" />
+</Solution>
