@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.slnLaunch.user
+[Dd]ebug/
+[Rr]elease/
+publish/
+*.db
+*.db-shm
+*.db-wal
+.idea/
+*.DotSettings.user
