@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Smart_X.Shared.DTOs
+﻿namespace Smart_X.Shared.DTOs
 {
-    internal class TelemetryIngestRequest
-    {
-    }
+    public record TelemetryIngestRequest(string DeviceId, SensorCategory Category, string ValueType, float? FloatValue, int? IntValue, bool? BoolValue);
 }
