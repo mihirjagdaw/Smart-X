@@ -10,5 +10,6 @@ publish/
 *.db
 *.db-shm
 *.db-wal
+Smart-X.Api/uploads/
 .idea/
 *.DotSettings.user

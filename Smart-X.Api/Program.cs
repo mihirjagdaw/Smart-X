@@ -24,6 +24,8 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "uploads"));
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {

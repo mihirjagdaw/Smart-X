@@ -11,5 +11,6 @@ namespace Smart_X.Api.Data
 
         public DbSet<SensorProfile> Sensors => Set<SensorProfile>();
         public DbSet<TelemetryRecord> TelemetryRecords => Set<TelemetryRecord>();
+        public DbSet<SensorFile> SensorFiles => Set<SensorFile>();
     }
 }
