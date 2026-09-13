@@ -13,6 +13,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("SmartXDb")));
 
 builder.Services.AddSingleton<TelemetryHistoryStore>();
+builder.Services.AddHostedService<TelemetrySimulatorService>();
 
 builder.Services.AddCors(options =>
 {

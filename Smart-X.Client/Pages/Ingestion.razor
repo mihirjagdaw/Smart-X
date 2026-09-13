@@ -36,7 +36,7 @@
                             <strong>@sensor.MacAddress</strong> (@sensor.Location) &mdash; @sensor.Category
                             @if (hasReading)
                             {
-                                <span class="ms-2">Latest: @reading!.Value</span>
+                                <span class="ms-2">Latest: @reading!.Value.ToString("0.00")</span>
                             }
                             else
                             {
@@ -189,7 +189,7 @@
                             @foreach (var reading in history)
                             {
                                 <li class="list-group-item d-flex justify-content-between">
-                                    <span>@reading.Value</span>
+                                    <span>@reading.Value.ToString("0.00")</span>
                                     <span class="text-muted">@reading.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
                                 </li>
                             }
