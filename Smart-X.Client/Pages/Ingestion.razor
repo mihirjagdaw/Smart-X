@@ -3,11 +3,61 @@
 @using Smart_X.Shared
 @using Smart_X.Shared.DTOs
 @using Smart_X.Client.Models
+@implements IDisposable
 @inject HttpClient Http
 
 <PageTitle>Sensor Ingestion</PageTitle>
 
-<h1 class="mb-4">Sensor Data Ingestion and Telemetry</h1>
+<h1 class="mb-1">Sensor Data Ingestion and Telemetry</h1>
+<p class="mb-4"><a href="/sensors">Manage Sensors &rarr;</a></p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">Sensor Status Overview</h5>
+        <p class="text-muted small mb-3">Click a sensor to drill into its full reading history below.</p>
+
+        @{
+            var activeSensors = sensors.Where(s => s.IsActive).ToList();
+        }
+
+        @if (activeSensors.Count == 0)
+        {
+            <p class="text-muted">No active sensors.</p>
+        }
+        else
+        {
+            <div class="list-group">
+                @foreach (var sensor in activeSensors)
+                {
+                    var hasReading = latestReadings.TryGetValue(sensor.MacAddress, out var reading);
+                    <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                            @onclick="() => DrillDown(sensor.MacAddress)">
+                        <span>
+                            <strong>@sensor.MacAddress</strong> (@sensor.Location) &mdash; @sensor.Category
+                            @if (hasReading)
+                            {
+                                <span class="ms-2">Latest: @reading!.Value</span>
+                            }
+                            else
+                            {
+                                <span class="ms-2 text-muted">No data yet</span>
+                            }
+                        </span>
+                        @if (hasReading)
+                        {
+                            var status = GetStatus(reading!.Category, reading.Value);
+                            var freshness = GetFreshness(reading.Timestamp);
+                            <span>
+                                <span class="badge @status.CssClass me-1">@status.Label</span>
+                                <span class="badge @freshness.CssClass">@freshness.Label</span>
+                            </span>
+                        }
+                    </button>
+                }
+            </div>
+        }
+    </div>
+</div>
 
 <div class="row mb-4">
     <div class="col-md-6 mb-4 mb-md-0">
@@ -67,7 +117,7 @@
                         <label class="form-label">Device</label>
                         <InputSelect @bind-Value="telemetryForm.DeviceId" @bind-Value:after="LoadHistory" class="form-select">
                             <option value="">-- select a device --</option>
-                            @foreach (var sensor in sensors)
+                            @foreach (var sensor in sensors.Where(s => s.IsActive))
                             {
                                 <option value="@sensor.MacAddress">@sensor.MacAddress (@sensor.Location)</option>
                             }
@@ -159,7 +209,7 @@
             <label class="form-label">Device</label>
             <select class="form-select" @bind="fileDeviceId" @bind:after="LoadAttachedFiles">
                 <option value="">-- select a device --</option>
-                @foreach (var sensor in sensors)
+                @foreach (var sensor in sensors.Where(s => s.IsActive))
                 {
                     <option value="@sensor.MacAddress">@sensor.MacAddress (@sensor.Location)</option>
                 }
@@ -232,6 +282,7 @@
                         <th>Location</th>
                         <th>Category</th>
                         <th>Registered</th>
+                        <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -242,6 +293,16 @@
                             <td>@sensor.Location</td>
                             <td>@sensor.Category</td>
                             <td>@sensor.RegisteredAt.ToLocalTime().ToString("g")</td>
+                            <td>
+                                @if (sensor.IsActive)
+                                {
+                                    <span class="badge bg-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Inactive</span>
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -277,9 +338,64 @@
     private bool isLoadingFiles = false;
     private string? fileUploadError;
 
+    private Dictionary<string, SensorReadingResponse> latestReadings = new();
+    private System.Threading.Timer? _dashboardRefreshTimer;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadSensors();
+        await RefreshLatestReadings();
+        _dashboardRefreshTimer = new System.Threading.Timer(async _ => await RefreshLatestReadings(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task RefreshLatestReadings()
+    {
+        try
+        {
+            var latest = await Http.GetFromJsonAsync<List<SensorReadingResponse>>("api/Telemetry") ?? new();
+            latestReadings = latest.ToDictionary(r => r.DeviceId, r => r);
+
+            if (!string.IsNullOrEmpty(telemetryForm.DeviceId))
+            {
+                history = await Http.GetFromJsonAsync<List<SensorReadingResponse>>($"api/Telemetry/{telemetryForm.DeviceId}") ?? new();
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            // background refresh - ignore transient failures, next tick will retry
+        }
+    }
+
+    private async Task DrillDown(string deviceId)
+    {
+        telemetryForm.DeviceId = deviceId;
+        await LoadHistory();
+    }
+
+    // ponytail: one threshold band per category, not per specific measurement (e.g. moisture vs.
+    // canopy temp are both "Environmental"); refine to per-metric thresholds if sensors ever
+    // report what they're actually measuring, not just their category.
+    private static (string Label, string CssClass) GetStatus(SensorCategory category, float value) => category switch
+    {
+        SensorCategory.Environmental => value < 20 || value > 80 ? ("Critical", "bg-danger") : ("Normal", "bg-success"),
+        SensorCategory.PowerConsumption => value > 3000 ? ("Critical", "bg-danger") : ("Normal", "bg-success"),
+        SensorCategory.Actuator => value >= 1 ? ("On", "bg-primary") : ("Off", "bg-secondary"),
+        _ => ("Unknown", "bg-secondary")
+    };
+
+    private static (string Label, string CssClass) GetFreshness(DateTimeOffset timestamp)
+    {
+        var age = DateTimeOffset.UtcNow - timestamp;
+        if (age < TimeSpan.FromMinutes(5)) return ("Live", "bg-success");
+        if (age < TimeSpan.FromHours(1)) return ("Recent", "bg-warning text-dark");
+        return ("Stale", "bg-secondary");
+    }
+
+    public void Dispose()
+    {
+        _dashboardRefreshTimer?.Dispose();
     }
 
     private async Task LoadSensors()

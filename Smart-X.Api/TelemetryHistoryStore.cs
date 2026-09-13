@@ -37,5 +37,13 @@ namespace Smart_X.Api
         {
             return _history.TryGetValue(deviceId, out var history) ? history : new List<SensorReading>();
         }
+
+        public List<SensorReading> GetAllLatestReadings()
+        {
+            return _history.Values
+                .Where(readings => readings.Count > 0)
+                .Select(readings => readings[^1])
+                .ToList();
+        }
     }
 }

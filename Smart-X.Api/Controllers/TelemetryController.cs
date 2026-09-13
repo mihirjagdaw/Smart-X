@@ -67,6 +67,12 @@ namespace Smart_X.Api.Controllers
             return Ok(_telemetryHistoryStore.GetHistory(deviceId));
         }
 
+        [HttpGet]
+        public IActionResult GetAllLatestReadings()
+        {
+            return Ok(_telemetryHistoryStore.GetAllLatestReadings());
+        }
+
     }
 }
 
