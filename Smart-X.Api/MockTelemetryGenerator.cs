@@ -15,7 +15,7 @@
                 // j ~ index of readings
                 for (int j = 0; j < readingCount; j++)
                 {
-                    // random value for sensor reading (this case it is for temperature of a greenhouse at night)
+                    // random value for sensor reading (this case it is nighttime canopy temperature, °C, for a vineyard block)
                     batches[i][j] = (float)(random.NextDouble() * 20) + 11;
                 }
 
