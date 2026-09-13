@@ -1,0 +1,231 @@
+@page "/sensors"
+@using System.Net.Http.Json
+@using Smart_X.Shared
+@using Smart_X.Shared.DTOs
+@inject HttpClient Http
+
+<PageTitle>Manage Sensors</PageTitle>
+
+<h1 class="mb-3">Manage Sensors</h1>
+
+<p><a href="/ingestion">&larr; Back to Ingestion</a></p>
+
+@if (isLoading)
+{
+    <p class="text-muted">Loading sensors...</p>
+}
+else if (loadError is not null)
+{
+    <div class="alert alert-danger">@loadError</div>
+}
+else if (rows.Count == 0)
+{
+    <p class="text-muted">No sensors registered yet.</p>
+}
+else
+{
+    @if (actionError is not null)
+    {
+        <div class="alert alert-danger">@actionError</div>
+    }
+
+    <table class="table align-middle">
+        <thead>
+            <tr>
+                <th>MAC Address</th>
+                <th>Location</th>
+                <th>Category</th>
+                <th>Registered</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in rows)
+            {
+                <tr class="@(row.Sensor.IsActive ? "" : "table-secondary text-muted")">
+                    <td>@row.Sensor.MacAddress</td>
+                    <td>
+                        @if (row.IsEditing)
+                        {
+                            <input class="form-control form-control-sm" @bind="row.EditLocation" />
+                        }
+                        else
+                        {
+                            @row.Sensor.Location
+                        }
+                    </td>
+                    <td>
+                        @if (row.IsEditing)
+                        {
+                            <select class="form-select form-select-sm" @bind="row.EditCategory">
+                                @foreach (var category in Enum.GetValues<SensorCategory>())
+                                {
+                                    <option value="@category">@category</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            @row.Sensor.Category
+                        }
+                    </td>
+                    <td>@row.Sensor.RegisteredAt.ToLocalTime().ToString("g")</td>
+                    <td>
+                        @if (row.Sensor.IsActive)
+                        {
+                            <span class="badge bg-success">Active</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Inactive</span>
+                        }
+                    </td>
+                    <td class="text-end">
+                        @if (row.IsEditing)
+                        {
+                            <button class="btn btn-sm btn-primary me-1" @onclick="() => SaveEdit(row)">Save</button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelEdit(row)">Cancel</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(row)">Edit</button>
+                            @if (row.Sensor.IsActive)
+                            {
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => Deactivate(row)">Deactivate</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-success" @onclick="() => Reactivate(row)">Reactivate</button>
+                            }
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private class SensorRow
+    {
+        public SensorProfileResponse Sensor { get; set; } = null!;
+        public bool IsEditing { get; set; }
+        public string EditLocation { get; set; } = "";
+        public SensorCategory EditCategory { get; set; }
+    }
+
+    private List<SensorRow> rows = new();
+    private bool isLoading = true;
+    private string? loadError;
+    private string? actionError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSensors();
+    }
+
+    private async Task LoadSensors()
+    {
+        isLoading = true;
+        loadError = null;
+        try
+        {
+            var sensors = await Http.GetFromJsonAsync<List<SensorProfileResponse>>("api/Sensors") ?? new();
+            rows = sensors.Select(s => new SensorRow { Sensor = s }).ToList();
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Failed to load sensors: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void StartEdit(SensorRow row)
+    {
+        row.IsEditing = true;
+        row.EditLocation = row.Sensor.Location;
+        row.EditCategory = row.Sensor.Category;
+        actionError = null;
+    }
+
+    private void CancelEdit(SensorRow row)
+    {
+        row.IsEditing = false;
+    }
+
+    private async Task SaveEdit(SensorRow row)
+    {
+        if (string.IsNullOrWhiteSpace(row.EditLocation))
+        {
+            actionError = "Location cannot be empty.";
+            return;
+        }
+
+        actionError = null;
+        try
+        {
+            var request = new UpdateSensorRequest(row.EditLocation, row.EditCategory);
+            var response = await Http.PutAsJsonAsync($"api/Sensors/{row.Sensor.Id}", request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                row.Sensor = (await response.Content.ReadFromJsonAsync<SensorProfileResponse>())!;
+                row.IsEditing = false;
+            }
+            else
+            {
+                actionError = $"Update failed: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            actionError = $"Update failed: {ex.Message}";
+        }
+    }
+
+    private async Task Deactivate(SensorRow row)
+    {
+        actionError = null;
+        try
+        {
+            var response = await Http.PostAsync($"api/Sensors/{row.Sensor.Id}/deactivate", null);
+            if (response.IsSuccessStatusCode)
+            {
+                row.Sensor = (await response.Content.ReadFromJsonAsync<SensorProfileResponse>())!;
+            }
+            else
+            {
+                actionError = $"Deactivate failed: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            actionError = $"Deactivate failed: {ex.Message}";
+        }
+    }
+
+    private async Task Reactivate(SensorRow row)
+    {
+        actionError = null;
+        try
+        {
+            var response = await Http.PostAsync($"api/Sensors/{row.Sensor.Id}/reactivate", null);
+            if (response.IsSuccessStatusCode)
+            {
+                row.Sensor = (await response.Content.ReadFromJsonAsync<SensorProfileResponse>())!;
+            }
+            else
+            {
+                actionError = $"Reactivate failed: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            actionError = $"Reactivate failed: {ex.Message}";
+        }
+    }
+}
