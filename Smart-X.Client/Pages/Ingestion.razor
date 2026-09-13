@@ -151,6 +151,62 @@
     </div>
 </div>
 
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">Attach Files</h5>
+
+        <div class="mb-3">
+            <label class="form-label">Device</label>
+            <select class="form-select" @bind="fileDeviceId" @bind:after="LoadAttachedFiles">
+                <option value="">-- select a device --</option>
+                @foreach (var sensor in sensors)
+                {
+                    <option value="@sensor.MacAddress">@sensor.MacAddress (@sensor.Location)</option>
+                }
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <InputFile OnChange="OnFileSelected" class="form-control" />
+        </div>
+
+        @if (fileUploadError is not null)
+        {
+            <div class="alert alert-danger">@fileUploadError</div>
+        }
+
+        <button type="button" class="btn btn-primary" disabled="@(isUploadingFile || selectedFile is null)" @onclick="UploadFile">
+            @(isUploadingFile ? "Uploading..." : "Upload")
+        </button>
+
+        @if (!string.IsNullOrEmpty(fileDeviceId))
+        {
+            <hr />
+            <h6>Files for @fileDeviceId</h6>
+            @if (isLoadingFiles)
+            {
+                <p class="text-muted">Loading...</p>
+            }
+            else if (attachedFiles.Count == 0)
+            {
+                <p class="text-muted">No files attached yet.</p>
+            }
+            else
+            {
+                <ul class="list-group">
+                    @foreach (var file in attachedFiles)
+                    {
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>@file.FileName <span class="text-muted">(@FormatFileSize(file.SizeBytes))</span></span>
+                            <a class="btn btn-sm btn-outline-secondary" href="@GetFileUrl(file.Id)" target="_blank">Download</a>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+    </div>
+</div>
+
 <div class="card">
     <div class="card-body">
         <h5 class="card-title">Registered Sensors</h5>
@@ -210,6 +266,16 @@
     private string? sensorLoadError;
     private string? telemetrySubmitError;
     private string? telemetryValueError;
+
+    private const string ApiBaseUrl = "http://localhost:5256";
+    private const long MaxFileSizeBytes = 5 * 1024 * 1024;
+
+    private string fileDeviceId = "";
+    private IBrowserFile? selectedFile;
+    private List<SensorFileResponse> attachedFiles = new();
+    private bool isUploadingFile = false;
+    private bool isLoadingFiles = false;
+    private string? fileUploadError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -338,6 +404,100 @@
         finally
         {
             isLoadingHistory = false;
+        }
+    }
+
+    private void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        fileUploadError = null;
+    }
+
+    private static string FormatFileSize(long sizeBytes) =>
+        sizeBytes < 1024 ? $"{sizeBytes} B" : $"{sizeBytes / 1024.0:0.#} KB";
+
+    private string GetFileUrl(int fileId)
+    {
+        var sensorId = sensors.FirstOrDefault(s => s.MacAddress == fileDeviceId)?.Id;
+        return $"{ApiBaseUrl}/api/Sensors/{sensorId}/files/{fileId}";
+    }
+
+    private async Task UploadFile()
+    {
+        fileUploadError = null;
+
+        var selectedSensor = sensors.FirstOrDefault(s => s.MacAddress == fileDeviceId);
+        if (selectedSensor is null)
+        {
+            fileUploadError = "Please select a device.";
+            return;
+        }
+
+        if (selectedFile is null)
+        {
+            fileUploadError = "Please choose a file.";
+            return;
+        }
+
+        if (selectedFile.Size > MaxFileSizeBytes)
+        {
+            fileUploadError = "File exceeds the 5 MB limit.";
+            return;
+        }
+
+        isUploadingFile = true;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            using var fileStream = selectedFile.OpenReadStream(MaxFileSizeBytes);
+            using var streamContent = new StreamContent(fileStream);
+            var contentType = string.IsNullOrEmpty(selectedFile.ContentType) ? "application/octet-stream" : selectedFile.ContentType;
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+            content.Add(streamContent, "file", selectedFile.Name);
+
+            var response = await Http.PostAsync($"api/Sensors/{selectedSensor.Id}/files", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                selectedFile = null;
+                await LoadAttachedFiles();
+            }
+            else
+            {
+                fileUploadError = $"Upload failed: {await response.Content.ReadAsStringAsync()}";
+            }
+        }
+        catch (Exception ex)
+        {
+            fileUploadError = $"Upload failed: {ex.Message}";
+        }
+        finally
+        {
+            isUploadingFile = false;
+        }
+    }
+
+    private async Task LoadAttachedFiles()
+    {
+        var selectedSensor = sensors.FirstOrDefault(s => s.MacAddress == fileDeviceId);
+        if (selectedSensor is null)
+        {
+            attachedFiles = new();
+            return;
+        }
+
+        isLoadingFiles = true;
+        try
+        {
+            attachedFiles = await Http.GetFromJsonAsync<List<SensorFileResponse>>($"api/Sensors/{selectedSensor.Id}/files") ?? new();
+        }
+        catch
+        {
+            attachedFiles = new();
+        }
+        finally
+        {
+            isLoadingFiles = false;
         }
     }
 }

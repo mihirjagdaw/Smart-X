@@ -21,18 +21,70 @@ namespace Smart_X.Api.Controllers
         [HttpPost]
         public async Task<IActionResult> RegisterSensor([FromBody] CreateSensorRequest request)
         {
-            var sensorProfile = new SensorProfile(0, request.MacAddress, request.Location, request.Category, DateTimeOffset.UtcNow);
+            var sensorProfile = new SensorProfile(0, request.MacAddress, request.Location, request.Category, DateTimeOffset.UtcNow, isActive: true);
 
             _dbContext.Sensors.Add(sensorProfile);
             await _dbContext.SaveChangesAsync();
-            return Ok(sensorProfile);
+            return Ok(ToResponse(sensorProfile));
         }
 
         [HttpGet]
         public async Task<IActionResult> GetAllSensors()
         {
-            return Ok(await _dbContext.Sensors.ToListAsync());
+            var sensors = await _dbContext.Sensors
+                .Select(s => new SensorProfileResponse(s.Id, s.MacAddress, s.Location, s.Category, s.RegisteredAt, s.IsActive))
+                .ToListAsync();
+            return Ok(sensors);
         }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateSensor(int id, [FromBody] UpdateSensorRequest request)
+        {
+            var sensor = await _dbContext.Sensors.FindAsync(id);
+            if (sensor == null)
+            {
+                return NotFound();
+            }
+
+            sensor.Location = request.Location;
+            sensor.Category = request.Category;
+            await _dbContext.SaveChangesAsync();
+
+            return Ok(ToResponse(sensor));
+        }
+
+        [HttpPost("{id}/deactivate")]
+        public async Task<IActionResult> DeactivateSensor(int id)
+        {
+            var sensor = await _dbContext.Sensors.FindAsync(id);
+            if (sensor == null)
+            {
+                return NotFound();
+            }
+
+            sensor.IsActive = false;
+            await _dbContext.SaveChangesAsync();
+
+            return Ok(ToResponse(sensor));
+        }
+
+        [HttpPost("{id}/reactivate")]
+        public async Task<IActionResult> ReactivateSensor(int id)
+        {
+            var sensor = await _dbContext.Sensors.FindAsync(id);
+            if (sensor == null)
+            {
+                return NotFound();
+            }
+
+            sensor.IsActive = true;
+            await _dbContext.SaveChangesAsync();
+
+            return Ok(ToResponse(sensor));
+        }
+
+        private static SensorProfileResponse ToResponse(SensorProfile sensor) =>
+            new(sensor.Id, sensor.MacAddress, sensor.Location, sensor.Category, sensor.RegisteredAt, sensor.IsActive);
 
         [HttpPost("{id}/files")]
         public async Task<IActionResult> UploadSensorFile(int id, IFormFile file)
