@@ -2,10 +2,10 @@ using Smart_X.Shared;
 
 namespace Smart_X.Api
 {
-    // ponytail: fixed-size ring buffer instead of an unbounded List<T> - keeps per-device
-    // memory bounded no matter how long the gateway runs, which matters once telemetry is
-    // arriving continuously rather than from occasional manual test posts. O(1) add, no
-    // per-write shifting like List.RemoveAt(0) would need.
+    /// <summary>
+    /// A circular buffer that stores a fixed number of the most recent sensor readings for a specific device. 
+    /// When the buffer reaches its capacity, the oldest readings are overwritten by new ones.
+    /// </summary>
     public class SensorHistoryBuffer
     {
         private readonly SensorReading?[] _buffer;
