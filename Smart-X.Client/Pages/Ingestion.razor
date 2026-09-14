@@ -20,7 +20,15 @@
             var activeSensors = sensors.Where(s => s.IsActive).ToList();
         }
 
-        @if (activeSensors.Count == 0)
+        @if (isLoadingSensors)
+        {
+            <p class="text-muted">Loading sensors...</p>
+        }
+        else if (sensorLoadError is not null)
+        {
+            <div class="alert alert-danger">@sensorLoadError</div>
+        }
+        else if (activeSensors.Count == 0)
         {
             <p class="text-muted">No active sensors.</p>
         }
@@ -253,60 +261,6 @@
                     }
                 </ul>
             }
-        }
-    </div>
-</div>
-
-<div class="card">
-    <div class="card-body">
-        <h5 class="card-title">Registered Sensors</h5>
-
-        @if (isLoadingSensors)
-        {
-            <p class="text-muted">Loading sensors...</p>
-        }
-        else if (sensorLoadError is not null)
-        {
-            <div class="alert alert-danger">@sensorLoadError</div>
-        }
-        else if (sensors.Count == 0)
-        {
-            <p class="text-muted">No sensors registered yet.</p>
-        }
-        else
-        {
-            <table class="table table-sm mb-0">
-                <thead>
-                    <tr>
-                        <th>MAC Address</th>
-                        <th>Location</th>
-                        <th>Category</th>
-                        <th>Registered</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var sensor in sensors)
-                    {
-                        <tr>
-                            <td>@sensor.MacAddress</td>
-                            <td>@sensor.Location</td>
-                            <td>@sensor.Category</td>
-                            <td>@sensor.RegisteredAt.ToLocalTime().ToString("g")</td>
-                            <td>
-                                @if (sensor.IsActive)
-                                {
-                                    <span class="badge bg-success">Active</span>
-                                }
-                                else
-                                {
-                                    <span class="badge bg-secondary">Inactive</span>
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
         }
     </div>
 </div>
