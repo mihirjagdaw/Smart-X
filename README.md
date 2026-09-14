@@ -2,6 +2,8 @@
 
 A vineyard IoT telemetry system. Sensors (soil moisture, canopy temperature, power draw, actuators like irrigation valves) report readings to a central API, which stores history and simulates live drift for demo purposes. A Blazor web app lets you register sensors, ingest/view telemetry, and manage the sensor fleet.
 
+**Demo video:** https://youtu.be/EgvMt7jgL68
+
 ## Stack
 
 - **Smart-X.Api** — ASP.NET Core Web API + EF Core + SQLite
