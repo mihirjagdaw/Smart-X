@@ -25,6 +25,11 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.Migrate();
+}
+
 Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "uploads"));
 
 // Configure the HTTP request pipeline.

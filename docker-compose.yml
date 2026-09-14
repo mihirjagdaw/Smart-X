@@ -1,0 +1,22 @@
+services:
+  smart-x-api:
+    build:
+      context: .
+      dockerfile: Smart-X.Api/Dockerfile
+    ports:
+      - "5256:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__SmartXDb=Data Source=/app/data/smartx.db
+    volumes:
+      - ./docker-data/db:/app/data
+      - ./docker-data/uploads:/app/uploads
+
+  smart-x-client:
+    build:
+      context: .
+      dockerfile: Smart-X.Client/Dockerfile
+    ports:
+      - "5128:80"
+    depends_on:
+      - smart-x-api

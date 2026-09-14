@@ -11,5 +11,6 @@ publish/
 *.db-shm
 *.db-wal
 Smart-X.Api/uploads/
+docker-data/
 .idea/
 *.DotSettings.user
