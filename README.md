@@ -70,3 +70,12 @@ Smart-X.Api/        Controllers, EF Core DbContext & migrations, telemetry simul
 Smart-X.Client/      Blazor pages (Ingestion, Manage Sensors, Home)
 Smart-X.Shared/      DTOs and domain models used by both projects
 ```
+
+## References
+
+- [How do I convert int/decimal to float in C#?](https://stackoverflow.com/questions/1042099/how-do-i-convert-int-decimal-to-float-in-c) - normalizing `TelemetryPacket<T>` values to `float` in `TelemetryController`
+- [Most efficient way to save a byte array as a file on disk in C#](https://stackoverflow.com/questions/128674/what-is-the-most-efficient-way-to-save-a-byte-array-as-a-file-on-disk-in-c) - streaming uploaded files to disk in `SensorsController.UploadSensorFile`
+- [Background tasks with hosted services in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/hosted-services) - `BackgroundService` base class used by `TelemetrySimulatorService`
+- [Operator overloading — C# reference](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/operator-overloading) - the `+`, `-`, `<`, `>` overloads on `SensorReading`
+- [Applying migrations — EF Core](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying) - `Database.Migrate()` auto-applying migrations on startup in `Program.cs`
+- [ASP.NET Core Blazor file uploads](https://learn.microsoft.com/en-us/aspnet/core/blazor/file-uploads) - `InputFile`/`IBrowserFile` usage in the Attach Files section of `Ingestion.razor`
