@@ -58,6 +58,10 @@ namespace Smart_X.Api.Migrations
                     b.Property<int>("Category")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 

@@ -12,6 +12,9 @@ namespace Smart_X.Client.Models
         [Required(ErrorMessage = "Location is required.")]
         public string Location { get; set; } = "";
 
+        [Required(ErrorMessage = "Description is required.")]
+        public string Description { get; set; } = "";
+
         public SensorCategory Category { get; set; }
     }
 }

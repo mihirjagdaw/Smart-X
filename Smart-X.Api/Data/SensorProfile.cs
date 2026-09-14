@@ -12,16 +12,19 @@ namespace Smart_X.Api.Data
 
         public SensorCategory Category { get; set; }
 
+        public string Description { get; set; }
+
         public DateTimeOffset RegisteredAt { get; set; }
 
         public bool IsActive { get; set; }
 
-        public SensorProfile(int id, string macAddress, string location, SensorCategory category, DateTimeOffset registeredAt, bool isActive)
+        public SensorProfile(int id, string macAddress, string location, SensorCategory category, string description, DateTimeOffset registeredAt, bool isActive)
         {
             Id = id;
             MacAddress = macAddress;
             Location = location;
             Category = category;
+            Description = description;
             RegisteredAt = registeredAt;
             IsActive = isActive;
         }

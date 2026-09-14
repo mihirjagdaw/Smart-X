@@ -21,7 +21,7 @@ namespace Smart_X.Api.Controllers
         [HttpPost]
         public async Task<IActionResult> RegisterSensor([FromBody] CreateSensorRequest request)
         {
-            var sensorProfile = new SensorProfile(0, request.MacAddress, request.Location, request.Category, DateTimeOffset.UtcNow, isActive: true);
+            var sensorProfile = new SensorProfile(0, request.MacAddress, request.Location, request.Category, request.Description, DateTimeOffset.UtcNow, isActive: true);
 
             _dbContext.Sensors.Add(sensorProfile);
             await _dbContext.SaveChangesAsync();
@@ -32,7 +32,7 @@ namespace Smart_X.Api.Controllers
         public async Task<IActionResult> GetAllSensors()
         {
             var sensors = await _dbContext.Sensors
-                .Select(s => new SensorProfileResponse(s.Id, s.MacAddress, s.Location, s.Category, s.RegisteredAt, s.IsActive))
+                .Select(s => new SensorProfileResponse(s.Id, s.MacAddress, s.Location, s.Category, s.Description, s.RegisteredAt, s.IsActive))
                 .ToListAsync();
             return Ok(sensors);
         }
@@ -48,6 +48,7 @@ namespace Smart_X.Api.Controllers
 
             sensor.Location = request.Location;
             sensor.Category = request.Category;
+            sensor.Description = request.Description;
             await _dbContext.SaveChangesAsync();
 
             return Ok(ToResponse(sensor));
@@ -84,7 +85,7 @@ namespace Smart_X.Api.Controllers
         }
 
         private static SensorProfileResponse ToResponse(SensorProfile sensor) =>
-            new(sensor.Id, sensor.MacAddress, sensor.Location, sensor.Category, sensor.RegisteredAt, sensor.IsActive);
+            new(sensor.Id, sensor.MacAddress, sensor.Location, sensor.Category, sensor.Description, sensor.RegisteredAt, sensor.IsActive);
 
         [HttpPost("{id}/files")]
         public async Task<IActionResult> UploadSensorFile(int id, IFormFile file)

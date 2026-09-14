@@ -1,4 +1,4 @@
 namespace Smart_X.Shared.DTOs
 {
-    public record UpdateSensorRequest(string Location, SensorCategory Category);
+    public record UpdateSensorRequest(string Location, SensorCategory Category, string Description);
 }

@@ -41,7 +41,7 @@
                     <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
                             @onclick="() => DrillDown(sensor.MacAddress)">
                         <span>
-                            <strong>@sensor.MacAddress</strong> (@sensor.Location) &mdash; @sensor.Category
+                            <strong>@sensor.MacAddress</strong> &mdash; @sensor.Description (@sensor.Location, @sensor.Category)
                             @if (hasReading)
                             {
                                 <span class="ms-2">Latest: @reading!.Value.ToString("0.00")</span>
@@ -99,6 +99,12 @@
                         </InputSelect>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <InputText @bind-Value="sensorForm.Description" class="form-control" placeholder="e.g. Humidity (RH%)" />
+                        <ValidationMessage For="@(() => sensorForm.Description)" />
+                    </div>
+
                     <button type="submit" class="btn btn-primary" disabled="@isRegisteringSensor">
                         @(isRegisteringSensor ? "Registering..." : "Register Sensor")
                     </button>
@@ -127,7 +133,7 @@
                             <option value="">-- select a device --</option>
                             @foreach (var sensor in sensors.Where(s => s.IsActive))
                             {
-                                <option value="@sensor.MacAddress">@sensor.MacAddress (@sensor.Location)</option>
+                                <option value="@sensor.MacAddress">@sensor.MacAddress &mdash; @sensor.Description (@sensor.Location)</option>
                             }
                         </InputSelect>
                         <ValidationMessage For="@(() => telemetryForm.DeviceId)" />
@@ -219,7 +225,7 @@
                 <option value="">-- select a device --</option>
                 @foreach (var sensor in sensors.Where(s => s.IsActive))
                 {
-                    <option value="@sensor.MacAddress">@sensor.MacAddress (@sensor.Location)</option>
+                    <option value="@sensor.MacAddress">@sensor.MacAddress &mdash; @sensor.Description (@sensor.Location)</option>
                 }
             </select>
         </div>
@@ -376,7 +382,7 @@
         sensorSubmitError = null;
         try
         {
-            var request = new CreateSensorRequest(sensorForm.MacAddress, sensorForm.Location, sensorForm.Category);
+            var request = new CreateSensorRequest(sensorForm.MacAddress, sensorForm.Location, sensorForm.Category, sensorForm.Description);
             var response = await Http.PostAsJsonAsync("api/Sensors", request);
 
             if (response.IsSuccessStatusCode)

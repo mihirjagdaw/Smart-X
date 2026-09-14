@@ -33,6 +33,7 @@ else
         <thead>
             <tr>
                 <th>MAC Address</th>
+                <th>Description</th>
                 <th>Location</th>
                 <th>Category</th>
                 <th>Registered</th>
@@ -45,6 +46,16 @@ else
             {
                 <tr class="@(row.Sensor.IsActive ? "" : "table-secondary text-muted")">
                     <td>@row.Sensor.MacAddress</td>
+                    <td>
+                        @if (row.IsEditing)
+                        {
+                            <input class="form-control form-control-sm" @bind="row.EditDescription" />
+                        }
+                        else
+                        {
+                            @row.Sensor.Description
+                        }
+                    </td>
                     <td>
                         @if (row.IsEditing)
                         {
@@ -113,6 +124,7 @@ else
         public bool IsEditing { get; set; }
         public string EditLocation { get; set; } = "";
         public SensorCategory EditCategory { get; set; }
+        public string EditDescription { get; set; } = "";
     }
 
     private List<SensorRow> rows = new();
@@ -149,6 +161,7 @@ else
         row.IsEditing = true;
         row.EditLocation = row.Sensor.Location;
         row.EditCategory = row.Sensor.Category;
+        row.EditDescription = row.Sensor.Description;
         actionError = null;
     }
 
@@ -165,10 +178,16 @@ else
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(row.EditDescription))
+        {
+            actionError = "Description cannot be empty.";
+            return;
+        }
+
         actionError = null;
         try
         {
-            var request = new UpdateSensorRequest(row.EditLocation, row.EditCategory);
+            var request = new UpdateSensorRequest(row.EditLocation, row.EditCategory, row.EditDescription);
             var response = await Http.PutAsJsonAsync($"api/Sensors/{row.Sensor.Id}", request);
 
             if (response.IsSuccessStatusCode)
