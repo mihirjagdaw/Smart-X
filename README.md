@@ -51,7 +51,7 @@ A few language/CLR features the brief calls for, and where they live:
 
 - **Generics** — [`TelemetryPacket<T>`](Smart-X.Shared/TelemetryPacket.cs) wraps a single reading with `T : struct`, so `float`, `int`, and `bool` payloads are stored and read as their real value type instead of boxing everything to `object`. `TelemetryController` picks the concrete `T` based on the sensor's category before handing the packet off to be normalized into a `SensorReading`.
 
-- **Operator overloading** — [`SensorReading`](Smart-X.Shared/SensorReading.cs) overloads `+`, `-`, `<`, and `>` so readings from the same sensor/category can be compared and combined directly (e.g. `readingB - readingA` for a delta over time) instead of reaching into `.Value` everywhere. Mismatched categories or device IDs throw rather than silently producing a meaningless result.
+- **Operator overloading** — [`SensorReading`](Smart-X.Shared/SensorReading.cs) overloads `+`, `-`, `<`, and `>` so readings can be compared and combined directly instead of reaching into `.Value` everywhere. `TelemetryHistoryStore.GetTrend` (`GET /api/Telemetry/{deviceId}/trend`) uses `-`, `<`, and `>` to compute the delta and direction between a sensor's two most recent readings; `GetCategoryTotal` (`GET /api/Telemetry/total/{category}`) uses `+` to sum the latest reading across every sensor in a category. Both surface directly in the Ingestion page's Sensor Status Overview — a Rising/Falling/Stable badge per sensor and a category totals line. Mismatched categories or device IDs throw rather than silently producing a meaningless result.
 
 - **Recursion** — [`DeploymentNode.ValidateNode`](Smart-X.Shared/DeploymentNode.cs) recursively walks a facility → zone → subzone → device hierarchy, failing the whole subtree if any child node has a blank name. `SensorsController` builds this tree from a sensor's `Location` field (a `/`-delimited path like `Estate/Block A/Row 3`, via `DeploymentNode.FromPath`) and rejects registration or updates that don't validate — so a location like `Estate//Row 3` is caught server-side instead of silently stored.
 
@@ -59,7 +59,7 @@ A few language/CLR features the brief calls for, and where they live:
 
 - **Background processing** — [`TelemetrySimulatorService`](Smart-X.Api/TelemetrySimulatorService.cs) is an ASP.NET Core `BackgroundService` that ticks every 5 seconds, drifting every active sensor's value by a small random delta (clamped per category, with occasional toggles for actuators) and writing it to both the database and the in-memory buffer. This is what makes the dashboard update on its own without any user action.
 
-- **Jagged arrays** — [`MockTelemetryGenerator.GenerateBatches`](Smart-X.Api/MockTelemetryGenerator.cs) returns a `float[][]` where each row (device) has a different number of readings, used for an early bulk-seeding demo of realistic canopy-temperature data.
+- **Jagged arrays** — [`MockTelemetryGenerator.GenerateBatches`](Smart-X.Api/MockTelemetryGenerator.cs) returns a `float[][]` where each row (device) has a different number of readings. `SensorsController.RegisterSensor` calls it to seed a newly registered Environmental sensor with a handful of plausible historical readings, so its history/dashboard isn't empty before the background simulator has ticked.
 
 ## Project layout
 

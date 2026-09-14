@@ -39,6 +39,18 @@ namespace Smart_X.Api.Controllers
 
             _dbContext.Sensors.Add(sensorProfile);
             await _dbContext.SaveChangesAsync();
+
+            if (sensorProfile.Category == SensorCategory.Environmental)
+            {
+                var seedReadings = MockTelemetryGenerator.GenerateBatches(deviceCount: 1, minReadingsPerBatch: 3, maxReadingsPerBatch: 8)[0];
+                _telemetryHistoryStore.AddBatch(sensorProfile.MacAddress, sensorProfile.Category, seedReadings);
+                foreach (var value in seedReadings)
+                {
+                    _dbContext.TelemetryRecords.Add(new TelemetryRecord(0, sensorProfile.MacAddress, sensorProfile.Category, value, DateTimeOffset.UtcNow));
+                }
+                await _dbContext.SaveChangesAsync();
+            }
+
             return Ok(ToResponse(sensorProfile));
         }
 

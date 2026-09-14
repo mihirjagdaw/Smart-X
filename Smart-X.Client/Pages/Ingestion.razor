@@ -55,14 +55,29 @@
                         {
                             var status = GetStatus(reading!.Category, reading.Value);
                             var freshness = GetFreshness(reading.Timestamp);
+                            trends.TryGetValue(sensor.MacAddress, out var trend);
                             <span>
                                 <span class="badge @status.CssClass me-1">@status.Label</span>
-                                <span class="badge @freshness.CssClass">@freshness.Label</span>
+                                <span class="badge @freshness.CssClass me-1">@freshness.Label</span>
+                                @if (trend is not null)
+                                {
+                                    <span class="badge @GetTrendCssClass(trend.Trend)" title="Δ @trend.Delta.ToString("0.00")">@GetTrendArrow(trend.Trend) @trend.Trend</span>
+                                }
                             </span>
                         }
                     </button>
                 }
             </div>
+        }
+
+        @if (categoryTotals.Count > 0)
+        {
+            <hr />
+            <p class="text-muted small mb-1">Category totals (sum of every active sensor's latest reading in that category)</p>
+            @foreach (var (category, total) in categoryTotals)
+            {
+                <span class="badge bg-info text-dark me-2">@category: @total.Value.ToString("0.00")</span>
+            }
         }
     </div>
 </div>
@@ -296,6 +311,8 @@
     private string? fileUploadError;
 
     private Dictionary<string, SensorReadingResponse> latestReadings = new();
+    private Dictionary<string, TrendResponse> trends = new();
+    private Dictionary<SensorCategory, SensorReadingResponse> categoryTotals = new();
     private System.Threading.Timer? _dashboardRefreshTimer;
 
     protected override async Task OnInitializedAsync()
@@ -317,6 +334,8 @@
                 history = await Http.GetFromJsonAsync<List<SensorReadingResponse>>($"api/Telemetry/{telemetryForm.DeviceId}") ?? new();
             }
 
+            await RefreshTrendsAndTotals();
+
             await InvokeAsync(StateHasChanged);
         }
         catch
@@ -324,6 +343,42 @@
             // background refresh - ignore transient failures, next tick will retry
         }
     }
+
+    // Pulls the SensorReading operator-overload endpoints: trend (-, <, >) per device, totals (+) per category.
+    private async Task RefreshTrendsAndTotals()
+    {
+        foreach (var deviceId in latestReadings.Keys)
+        {
+            var response = await Http.GetAsync($"api/Telemetry/{deviceId}/trend");
+            if (response.IsSuccessStatusCode)
+            {
+                trends[deviceId] = (await response.Content.ReadFromJsonAsync<TrendResponse>())!;
+            }
+        }
+
+        foreach (var category in Enum.GetValues<SensorCategory>())
+        {
+            var response = await Http.GetAsync($"api/Telemetry/total/{(int)category}");
+            if (response.IsSuccessStatusCode)
+            {
+                categoryTotals[category] = (await response.Content.ReadFromJsonAsync<SensorReadingResponse>())!;
+            }
+        }
+    }
+
+    private static string GetTrendArrow(string trend) => trend switch
+    {
+        "Rising" => "▲",
+        "Falling" => "▼",
+        _ => "▬"
+    };
+
+    private static string GetTrendCssClass(string trend) => trend switch
+    {
+        "Rising" => "bg-success",
+        "Falling" => "bg-danger",
+        _ => "bg-secondary"
+    };
 
     private async Task DrillDown(string deviceId)
     {

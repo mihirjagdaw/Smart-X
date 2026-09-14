@@ -54,5 +54,33 @@ namespace Smart_X.Api
         {
             _history.Remove(deviceId);
         }
+
+        // Uses SensorReading's -, <, > operator overloads to compare the two most recent readings.
+        public (SensorReading Delta, string Trend)? GetTrend(string deviceId)
+        {
+            if (!_history.TryGetValue(deviceId, out var buffer)) return null;
+
+            var readings = buffer.ToList();
+            if (readings.Count < 2) return null;
+
+            var latest = readings[^1];
+            var previous = readings[^2];
+            var delta = latest - previous;
+            var trend = latest > previous ? "Rising" : latest < previous ? "Falling" : "Stable";
+            return (delta, trend);
+        }
+
+        // Uses SensorReading's + operator overload to combine the latest reading from every sensor in a category.
+        public SensorReading? GetCategoryTotal(SensorCategory category)
+        {
+            SensorReading? total = null;
+            foreach (var buffer in _history.Values)
+            {
+                var latest = buffer.Latest;
+                if (latest is null || latest.Category != category) continue;
+                total = total is null ? latest : total + latest;
+            }
+            return total;
+        }
     }
 }

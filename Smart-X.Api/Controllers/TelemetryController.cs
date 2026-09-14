@@ -73,6 +73,28 @@ namespace Smart_X.Api.Controllers
             return Ok(_telemetryHistoryStore.GetAllLatestReadings());
         }
 
+        [HttpGet("{deviceId}/trend")]
+        public IActionResult GetTrend(string deviceId)
+        {
+            var result = _telemetryHistoryStore.GetTrend(deviceId);
+            if (result is null)
+            {
+                return NotFound("Not enough history yet to compute a trend for this device.");
+            }
+            return Ok(new TrendResponse(result.Value.Delta.Value, result.Value.Trend));
+        }
+
+        [HttpGet("total/{category}")]
+        public IActionResult GetCategoryTotal(SensorCategory category)
+        {
+            var total = _telemetryHistoryStore.GetCategoryTotal(category);
+            if (total is null)
+            {
+                return NotFound("No active sensors reporting for this category yet.");
+            }
+            return Ok(total);
+        }
+
     }
 }
 
