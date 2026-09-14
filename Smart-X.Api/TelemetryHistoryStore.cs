@@ -49,5 +49,10 @@ namespace Smart_X.Api
                 .Select(latest => latest!)
                 .ToList();
         }
+
+        public void RemoveDevice(string deviceId)
+        {
+            _history.Remove(deviceId);
+        }
     }
 }

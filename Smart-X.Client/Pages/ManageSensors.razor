@@ -3,6 +3,7 @@
 @using Smart_X.Shared
 @using Smart_X.Shared.DTOs
 @inject HttpClient Http
+@inject IJSRuntime JS
 
 <PageTitle>Manage Sensors</PageTitle>
 
@@ -107,7 +108,8 @@ else
                             }
                             else
                             {
-                                <button class="btn btn-sm btn-outline-success" @onclick="() => Reactivate(row)">Reactivate</button>
+                                <button class="btn btn-sm btn-outline-success me-1" @onclick="() => Reactivate(row)">Reactivate</button>
+                                <button class="btn btn-sm btn-danger" @onclick="() => Delete(row)">Delete</button>
                             }
                         }
                     </td>
@@ -245,6 +247,34 @@ else
         catch (Exception ex)
         {
             actionError = $"Reactivate failed: {ex.Message}";
+        }
+    }
+
+    private async Task Delete(SensorRow row)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"Permanently delete {row.Sensor.MacAddress}? This also deletes all of its telemetry history and attached files. This cannot be undone.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        actionError = null;
+        try
+        {
+            var response = await Http.DeleteAsync($"api/Sensors/{row.Sensor.Id}");
+            if (response.IsSuccessStatusCode)
+            {
+                rows.Remove(row);
+            }
+            else
+            {
+                actionError = $"Delete failed: {await response.Content.ReadAsStringAsync()}";
+            }
+        }
+        catch (Exception ex)
+        {
+            actionError = $"Delete failed: {ex.Message}";
         }
     }
 }

@@ -11,16 +11,24 @@ namespace Smart_X.Api.Controllers
     {
         private readonly AppDbContext _dbContext;
         private readonly IWebHostEnvironment _environment;
+        private readonly TelemetryHistoryStore _telemetryHistoryStore;
 
-        public SensorsController(AppDbContext dbContext, IWebHostEnvironment environment)
+        public SensorsController(AppDbContext dbContext, IWebHostEnvironment environment, TelemetryHistoryStore telemetryHistoryStore)
         {
             _dbContext = dbContext;
             _environment = environment;
+            _telemetryHistoryStore = telemetryHistoryStore;
         }
 
         [HttpPost]
         public async Task<IActionResult> RegisterSensor([FromBody] CreateSensorRequest request)
         {
+            var macInUse = await _dbContext.Sensors.AnyAsync(s => s.MacAddress == request.MacAddress);
+            if (macInUse)
+            {
+                return BadRequest($"A sensor with MAC address {request.MacAddress} is already registered.");
+            }
+
             var sensorProfile = new SensorProfile(0, request.MacAddress, request.Location, request.Category, request.Description, DateTimeOffset.UtcNow, isActive: true);
 
             _dbContext.Sensors.Add(sensorProfile);
@@ -82,6 +90,43 @@ namespace Smart_X.Api.Controllers
             await _dbContext.SaveChangesAsync();
 
             return Ok(ToResponse(sensor));
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteSensor(int id)
+        {
+            var sensor = await _dbContext.Sensors.FindAsync(id);
+            if (sensor == null)
+            {
+                return NotFound();
+            }
+
+            if (sensor.IsActive)
+            {
+                return BadRequest("Deactivate the sensor before deleting it.");
+            }
+
+            var files = await _dbContext.SensorFiles.Where(f => f.SensorId == id).ToListAsync();
+            var uploadsFolder = Path.Combine(_environment.ContentRootPath, "uploads");
+            foreach (var file in files)
+            {
+                var fullPath = Path.Combine(uploadsFolder, file.StoredFileName);
+                if (System.IO.File.Exists(fullPath))
+                {
+                    System.IO.File.Delete(fullPath);
+                }
+            }
+            _dbContext.SensorFiles.RemoveRange(files);
+
+            var telemetryRecords = await _dbContext.TelemetryRecords.Where(t => t.DeviceId == sensor.MacAddress).ToListAsync();
+            _dbContext.TelemetryRecords.RemoveRange(telemetryRecords);
+
+            _telemetryHistoryStore.RemoveDevice(sensor.MacAddress);
+
+            _dbContext.Sensors.Remove(sensor);
+            await _dbContext.SaveChangesAsync();
+
+            return NoContent();
         }
 
         private static SensorProfileResponse ToResponse(SensorProfile sensor) =>

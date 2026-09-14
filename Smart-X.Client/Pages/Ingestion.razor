@@ -129,7 +129,7 @@
 
                     <div class="mb-3">
                         <label class="form-label">Device</label>
-                        <InputSelect @bind-Value="telemetryForm.DeviceId" @bind-Value:after="LoadHistory" class="form-select">
+                        <InputSelect @bind-Value="telemetryForm.DeviceId" @bind-Value:after="OnTelemetryDeviceSelected" class="form-select">
                             <option value="">-- select a device --</option>
                             @foreach (var sensor in sensors.Where(s => s.IsActive))
                             {
@@ -141,11 +141,8 @@
 
                     <div class="mb-3">
                         <label class="form-label">Value Type</label>
-                        <InputSelect @bind-Value="telemetryForm.ValueType" class="form-select">
-                            <option value="float">Float</option>
-                            <option value="int">Int</option>
-                            <option value="bool">Bool</option>
-                        </InputSelect>
+                        <input class="form-control" value="@telemetryForm.ValueType" disabled />
+                        <div class="form-text">Determined automatically by the selected sensor's category.</div>
                     </div>
 
                     @if (telemetryForm.ValueType == "float")
@@ -392,7 +389,7 @@
             }
             else
             {
-                sensorSubmitError = $"Registration failed: {response.StatusCode}";
+                sensorSubmitError = $"Registration failed: {await response.Content.ReadAsStringAsync()}";
             }
         }
         catch (Exception ex)
@@ -458,6 +455,24 @@
         {
             isIngestingTelemetry = false;
         }
+    }
+
+    // matches the brief's own domain mapping: float for temperature-style readings,
+    // int for power metrics, bool for switches/actuators - keeps a sensor's history from
+    // ever mixing mismatched value types (e.g. a bool reading sitting in a wattage stream).
+    private static string GetValueTypeForCategory(SensorCategory category) => category switch
+    {
+        SensorCategory.Environmental => "float",
+        SensorCategory.PowerConsumption => "int",
+        SensorCategory.Actuator => "bool",
+        _ => "float"
+    };
+
+    private async Task OnTelemetryDeviceSelected()
+    {
+        var selectedSensor = sensors.FirstOrDefault(s => s.MacAddress == telemetryForm.DeviceId);
+        telemetryForm.ValueType = selectedSensor is not null ? GetValueTypeForCategory(selectedSensor.Category) : "float";
+        await LoadHistory();
     }
 
     private async Task LoadHistory()
