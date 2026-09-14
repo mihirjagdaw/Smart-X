@@ -24,6 +24,8 @@ Then open **http://localhost:5128**. The API is on **http://localhost:5256**. Da
 docker compose down
 ```
 
+On Windows, double-clicking [`docker-setup.bat`](docker-setup.bat) does the same thing without touching a terminal — it builds and starts the stack, waits for the client to actually respond, then opens it in your browser.
+
 ### Option 2: Local dev
 
 Run the API and client in separate terminals from the repo root:
@@ -62,6 +64,15 @@ A few language/CLR features the brief calls for, and where they live:
 - **Background processing** — [`TelemetrySimulatorService`](Smart-X.Api/TelemetrySimulatorService.cs) is an ASP.NET Core `BackgroundService` that ticks every 5 seconds, drifting every active sensor's value by a small random delta (clamped per category, with occasional toggles for actuators) and writing it to both the database and the in-memory buffer. This is what makes the dashboard update on its own without any user action.
 
 - **Jagged arrays** — [`MockTelemetryGenerator.GenerateBatches`](Smart-X.Api/MockTelemetryGenerator.cs) returns a `float[][]` where each row (device) has a different number of readings. `SensorsController.RegisterSensor` calls it to seed a newly registered Environmental sensor with a handful of plausible historical readings, so its history/dashboard isn't empty before the background simulator has ticked.
+
+## References
+
+- [How do I convert int/decimal to float in C#?](https://stackoverflow.com/questions/1042099/how-do-i-convert-int-decimal-to-float-in-c) — normalizing `TelemetryPacket<T>` values to `float` in `TelemetryController`
+- [Most efficient way to save a byte array as a file on disk in C#](https://stackoverflow.com/questions/128674/what-is-the-most-efficient-way-to-save-a-byte-array-as-a-file-on-disk-in-c) — streaming uploaded files to disk in `SensorsController.UploadSensorFile`
+- [Background tasks with hosted services in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/hosted-services) — `BackgroundService` base class used by `TelemetrySimulatorService`
+- [Operator overloading — C# reference](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/operator-overloading) — the `+`, `-`, `<`, `>` overloads on `SensorReading`
+- [Applying migrations — EF Core](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying) — `Database.Migrate()` auto-applying migrations on startup in `Program.cs`
+- [ASP.NET Core Blazor file uploads](https://learn.microsoft.com/en-us/aspnet/core/blazor/file-uploads) — `InputFile`/`IBrowserFile` usage in the Attach Files section of `Ingestion.razor`
 
 ## Project layout
 
