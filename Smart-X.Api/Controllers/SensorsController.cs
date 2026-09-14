@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Smart_X.Api.Data;
+using Smart_X.Shared;
 using Smart_X.Shared.DTOs;
 
 namespace Smart_X.Api.Controllers
@@ -29,6 +30,11 @@ namespace Smart_X.Api.Controllers
                 return BadRequest($"A sensor with MAC address {request.MacAddress} is already registered.");
             }
 
+            if (!DeploymentNode.ValidateNode(DeploymentNode.FromPath(request.Location)))
+            {
+                return BadRequest("Location must be a facility/zone path (e.g. 'Estate/Block A/Row 3') with no empty segments.");
+            }
+
             var sensorProfile = new SensorProfile(0, request.MacAddress, request.Location, request.Category, request.Description, DateTimeOffset.UtcNow, isActive: true);
 
             _dbContext.Sensors.Add(sensorProfile);
@@ -52,6 +58,11 @@ namespace Smart_X.Api.Controllers
             if (sensor == null)
             {
                 return NotFound();
+            }
+
+            if (!DeploymentNode.ValidateNode(DeploymentNode.FromPath(request.Location)))
+            {
+                return BadRequest("Location must be a facility/zone path (e.g. 'Estate/Block A/Row 3') with no empty segments.");
             }
 
             sensor.Location = request.Location;
