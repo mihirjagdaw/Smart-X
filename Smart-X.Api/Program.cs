@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Smart_X.Api;
 using Smart_X.Api.Data;
+using Smart_X.Api.Processing;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +14,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("SmartXDb")));
 
 builder.Services.AddSingleton<TelemetryHistoryStore>();
+builder.Services.AddSingleton<DeviceRegistry>();
 builder.Services.AddHostedService<TelemetrySimulatorService>();
 
 builder.Services.AddCors(options =>
@@ -27,7 +29,9 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.Migrate();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+    app.Services.GetRequiredService<DeviceRegistry>().Load(db.Sensors.AsNoTracking().ToList());
 }
 
 Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "uploads"));

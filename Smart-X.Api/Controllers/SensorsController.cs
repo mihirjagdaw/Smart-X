@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Smart_X.Api.Data;
+using Smart_X.Api.Processing;
 using Smart_X.Shared;
 using Smart_X.Shared.DTOs;
 
@@ -13,12 +14,14 @@ namespace Smart_X.Api.Controllers
         private readonly AppDbContext _dbContext;
         private readonly IWebHostEnvironment _environment;
         private readonly TelemetryHistoryStore _telemetryHistoryStore;
+        private readonly DeviceRegistry _registry;
 
-        public SensorsController(AppDbContext dbContext, IWebHostEnvironment environment, TelemetryHistoryStore telemetryHistoryStore)
+        public SensorsController(AppDbContext dbContext, IWebHostEnvironment environment, TelemetryHistoryStore telemetryHistoryStore, DeviceRegistry registry)
         {
             _dbContext = dbContext;
             _environment = environment;
             _telemetryHistoryStore = telemetryHistoryStore;
+            _registry = registry;
         }
 
         [HttpPost]
@@ -39,6 +42,7 @@ namespace Smart_X.Api.Controllers
 
             _dbContext.Sensors.Add(sensorProfile);
             await _dbContext.SaveChangesAsync();
+            _registry.Upsert(sensorProfile);
 
             if (sensorProfile.Category == SensorCategory.Environmental)
             {
@@ -81,6 +85,7 @@ namespace Smart_X.Api.Controllers
             sensor.Category = request.Category;
             sensor.Description = request.Description;
             await _dbContext.SaveChangesAsync();
+            _registry.Upsert(sensor);
 
             return Ok(ToResponse(sensor));
         }
@@ -96,6 +101,7 @@ namespace Smart_X.Api.Controllers
 
             sensor.IsActive = false;
             await _dbContext.SaveChangesAsync();
+            _registry.Upsert(sensor);
 
             return Ok(ToResponse(sensor));
         }
@@ -111,6 +117,7 @@ namespace Smart_X.Api.Controllers
 
             sensor.IsActive = true;
             await _dbContext.SaveChangesAsync();
+            _registry.Upsert(sensor);
 
             return Ok(ToResponse(sensor));
         }
@@ -148,6 +155,7 @@ namespace Smart_X.Api.Controllers
 
             _dbContext.Sensors.Remove(sensor);
             await _dbContext.SaveChangesAsync();
+            _registry.Remove(sensor.MacAddress);
 
             return NoContent();
         }
