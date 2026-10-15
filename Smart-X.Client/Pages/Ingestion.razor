@@ -389,13 +389,17 @@
     // ponytail: one threshold band per category, not per specific measurement (e.g. moisture vs.
     // canopy temp are both "Environmental"); refine to per-metric thresholds if sensors ever
     // report what they're actually measuring, not just their category.
-    private static (string Label, string CssClass) GetStatus(SensorCategory category, float value) => category switch
+    private static (string Label, string CssClass) GetStatus(SensorCategory category, float value)
     {
-        SensorCategory.Environmental => value < 20 || value > 80 ? ("Critical", "bg-danger") : ("Normal", "bg-success"),
-        SensorCategory.PowerConsumption => value > 3000 ? ("Critical", "bg-danger") : ("Normal", "bg-success"),
-        SensorCategory.Actuator => value >= 1 ? ("On", "bg-primary") : ("Off", "bg-secondary"),
-        _ => ("Unknown", "bg-secondary")
-    };
+        if (category == SensorCategory.Actuator)
+        {
+            return value >= 1 ? ("On", "bg-primary") : ("Off", "bg-secondary");
+        }
+
+        return AlertRules.Evaluate(category, value) == Severity.Critical
+            ? ("Critical", "bg-danger")
+            : ("Normal", "bg-success");
+    }
 
     private static (string Label, string CssClass) GetFreshness(DateTimeOffset timestamp)
     {
