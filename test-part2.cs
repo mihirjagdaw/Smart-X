@@ -1,4 +1,5 @@
 #:project Smart-X.Api/Smart-X.Api.csproj
+using Smart_X.Api;
 using Smart_X.Api.Data;
 using Smart_X.Api.Processing;
 using Smart_X.Shared;
@@ -46,6 +47,35 @@ pipeline.Enqueue(Make("N", 6, PacketRank.Normal));
 pipeline.Enqueue(Make("C3", 97, PacketRank.Critical));
 var stats = pipeline.GetStats();
 Check("stats report per-lane depth", stats.StandardDepth == 1 && stats.PriorityDepth == 1, $"{stats.StandardDepth}/{stats.PriorityDepth}");
+
+// --- TelemetryHistoryStore timeline: ordered on insert, collision-safe, bounded, windowed ---
+var store = new TelemetryHistoryStore();
+var start = DateTimeOffset.UtcNow.AddMinutes(-10);
+SensorReading At(string mac, float value, DateTimeOffset when) => new(mac, SensorCategory.Environmental, value, when);
+
+store.Add(At("T1", 3, start.AddSeconds(3)));
+store.Add(At("T1", 1, start.AddSeconds(1)));
+store.Add(At("T1", 2, start.AddSeconds(2)));
+Check("timeline returns out-of-order inserts sorted by timestamp",
+    string.Join(",", store.GetTimeline("T1", 60).Select(r => r.Value)) == "1,2,3");
+
+store.Add(At("T2", 10, start));
+store.Add(At("T2", 20, start));
+Check("two readings with the same timestamp are both kept", store.GetTimeline("T2", 60).Count == 2);
+
+for (var i = 0; i < 600; i++) store.Add(At("T3", i, start.AddMilliseconds(i)));
+var capped = store.GetTimeline("T3", 60);
+Check("timeline is capped at 500 entries, dropping the oldest",
+    capped.Count == 500 && capped[0].Value == 100 && capped[^1].Value == 599, $"{capped.Count} first={capped[0].Value}");
+
+store.Add(At("T4", 1, DateTimeOffset.UtcNow.AddMinutes(-120)));
+store.Add(At("T4", 2, DateTimeOffset.UtcNow.AddMinutes(-1)));
+Check("timeline window excludes readings older than the cutoff",
+    string.Join(",", store.GetTimeline("T4", 60).Select(r => r.Value)) == "2");
+
+store.RemoveDevice("T1");
+Check("removing a device clears its timeline", store.GetTimeline("T1", 60).Count == 0);
+Check("an unknown device has an empty timeline", store.GetTimeline("NOPE", 60).Count == 0);
 
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
