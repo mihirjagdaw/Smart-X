@@ -77,6 +77,28 @@ store.RemoveDevice("T1");
 Check("removing a device clears its timeline", store.GetTimeline("T1", 60).Count == 0);
 Check("an unknown device has an empty timeline", store.GetTimeline("NOPE", 60).Count == 0);
 
+// --- AlertTracker: a HashSet keeps one alert per (device, type) however often it is reported ---
+var alerts = new AlertTracker();
+Check("first raise of an alert is new", alerts.TryRaise("A1", AlertType.Disconnected, "offline"));
+Check("a repeat raise is suppressed", !alerts.TryRaise("A1", AlertType.Disconnected, "offline"));
+alerts.TryRaise("A1", AlertType.Disconnected, "offline");
+var snap = alerts.Snapshot();
+Check("one active alert and two duplicates suppressed",
+    snap.Active.Count == 1 && snap.Suppressed == 2, $"{snap.Active.Count} active, {snap.Suppressed} suppressed");
+Check("the same device can hold a different alert type", alerts.TryRaise("A1", AlertType.Critical, "too high"));
+Check("clearing an alert that is not active does nothing", !alerts.Clear("A2", AlertType.Critical, "ok"));
+Check("clearing an active alert succeeds", alerts.Clear("A1", AlertType.Disconnected, "reconnected"));
+Check("a cleared alert can be raised again", alerts.TryRaise("A1", AlertType.Disconnected, "offline again"));
+alerts.ClearDevice("a1");
+Check("clearing a device removes all its alerts, whatever the MAC casing", alerts.Snapshot().Active.Count == 0);
+Check("the log records raises and clears, newest first",
+    alerts.Snapshot().Recent[0].Raised == false && alerts.Snapshot().Recent.Count(e => e.Raised) == 3);
+
+// --- SimulatorControl: toggling reports the new state ---
+var control = new SimulatorControl();
+Check("first toggle takes a device offline", control.ToggleOffline("A1") && control.IsOffline("a1"));
+Check("second toggle brings it back", !control.ToggleOffline("A1") && !control.IsOffline("A1"));
+
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures == 0 ? 0 : 1;
