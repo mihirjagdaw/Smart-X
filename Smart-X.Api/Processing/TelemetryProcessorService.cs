@@ -79,15 +79,20 @@ namespace Smart_X.Api.Processing
             // backlog cannot make a device that is still sending look silent.
             _registry.Update(packet.Mac, d => d with { LastValue = packet.Value });
 
-            if (packet.Rank == PacketRank.Critical)
+            // A command is the server talking to the device, not the device reporting, so it says nothing
+            // about its health and must not clear a Disconnected alert.
+            if (packet.Rank != PacketRank.Command)
             {
-                _alerts.TryRaise(device.Mac, AlertType.Critical, $"{device.Description} reading {packet.Value:0.##} is outside the safe range");
+                if (packet.Rank == PacketRank.Critical)
+                {
+                    _alerts.TryRaise(device.Mac, AlertType.Critical, $"{device.Description} reading {packet.Value:0.##} is outside the safe range");
+                }
+                else
+                {
+                    _alerts.Clear(device.Mac, AlertType.Critical, $"{device.Description} is back in range ({packet.Value:0.##})");
+                }
+                _alerts.Clear(device.Mac, AlertType.Disconnected, $"{device.Description} reconnected");
             }
-            else
-            {
-                _alerts.Clear(device.Mac, AlertType.Critical, $"{device.Description} is back in range ({packet.Value:0.##})");
-            }
-            _alerts.Clear(device.Mac, AlertType.Disconnected, $"{device.Description} reconnected");
 
             _pipeline.RecordProcessed(packet, lane);
         }
