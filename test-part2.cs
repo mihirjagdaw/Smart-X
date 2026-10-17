@@ -99,6 +99,31 @@ var control = new SimulatorControl();
 Check("first toggle takes a device offline", control.ToggleOffline("A1") && control.IsOffline("a1"));
 Check("second toggle brings it back", !control.ToggleOffline("A1") && !control.IsOffline("A1"));
 
+// --- Pipeline ranks: critical, then operator commands, then normal telemetry ---
+var ranked = new TelemetryPipeline();
+ranked.Enqueue(Make("NORMAL", 1, PacketRank.Normal));
+ranked.Enqueue(Make("COMMAND", 1, PacketRank.Command));
+ranked.Enqueue(Make("CRITICAL", 1, PacketRank.Critical));
+var rankOrder = new List<string>();
+for (var i = 0; i < 3; i++) rankOrder.Add((await ranked.DequeueAsync(CancellationToken.None)).Packet.Mac);
+Check("critical beats command beats normal", string.Join(",", rankOrder) == "CRITICAL,COMMAND,NORMAL", string.Join(",", rankOrder));
+
+// --- CommandHistory: a Stack, so undo always reverts the most recent command first ---
+var history = new CommandHistory();
+Check("undo on an empty history returns nothing instead of crashing", history.TryPop() is null);
+
+history.Push("Turn ON Valve 1", new List<DeviceChange> { new("V1", null, 0f) });
+var bulk = history.Push("Shut down all", new List<DeviceChange> { new("V1", 1f, 1f), new("V2", null, 1f), new("P1", null, 0f) });
+Check("command ids increase", bulk.Id == 2);
+Check("history lists the most recent command first", history.Snapshot()[0].Description == "Shut down all");
+
+var undone = history.TryPop();
+Check("undo returns the most recent command", undone is not null && undone.Id == 2);
+Check("a bulk command reverts every device it touched with its previous state",
+    undone!.Changes.Count == 3 && undone.Changes[0] == new DeviceChange("V1", 1f, 1f));
+Check("the earlier command is next", history.TryPop()?.Description == "Turn ON Valve 1");
+Check("history is empty again", history.TryPop() is null && history.Snapshot().Count == 0);
+
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures == 0 ? 0 : 1;
