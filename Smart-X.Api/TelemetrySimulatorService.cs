@@ -15,14 +15,15 @@ namespace Smart_X.Api
         private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(5);
 
         private readonly DeviceRegistry _registry;
+        private readonly SimulatorControl _control;
         private readonly ILogger<TelemetrySimulatorService> _logger;
         private readonly HttpClient _http;
         private readonly Random _random = new();
-        private readonly Dictionary<string, float> _lastValues = new();
 
-        public TelemetrySimulatorService(DeviceRegistry registry, IConfiguration configuration, ILogger<TelemetrySimulatorService> logger)
+        public TelemetrySimulatorService(DeviceRegistry registry, SimulatorControl control, IConfiguration configuration, ILogger<TelemetrySimulatorService> logger)
         {
             _registry = registry;
+            _control = control;
             _logger = logger;
             _http = new HttpClient { BaseAddress = new Uri(configuration["Simulator:ApiBaseUrl"] ?? "http://localhost:5256") };
         }
@@ -49,15 +50,12 @@ namespace Smart_X.Api
         {
             var requests = new List<TelemetryIngestRequest>();
 
-            foreach (var device in _registry.Snapshot().Where(d => d.IsActive))
+            foreach (var device in _registry.Snapshot().Where(d => d.IsActive && !_control.IsOffline(d.Mac)))
             {
-                var previous = _lastValues.TryGetValue(device.Mac, out var lastValue)
-                    ? lastValue
-                    : GetStartingValue(device.Category);
-
-                var next = Drift(device.Category, previous);
-                _lastValues[device.Mac] = next;
-                requests.Add(ToRequest(device, next));
+                // Drift from the last accepted reading, including manual ones, so an injected value sticks
+                // the way a real device's would instead of snapping back to a private baseline.
+                var previous = device.LastValue ?? GetStartingValue(device.Category);
+                requests.Add(ToRequest(device, Drift(device.Category, previous)));
             }
 
             if (requests.Count == 0) return;

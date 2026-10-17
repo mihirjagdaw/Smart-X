@@ -31,7 +31,7 @@ namespace Smart_X.Api.Controllers
                 return StatusCode(status, error);
             }
 
-            _pipeline.Enqueue(packet);
+            Accept(packet);
             return Accepted(new SensorReadingResponse(packet.Mac, packet.Category, packet.Value, packet.Timestamp));
         }
 
@@ -54,11 +54,18 @@ namespace Smart_X.Api.Controllers
                     continue;
                 }
 
-                _pipeline.Enqueue(packet);
+                Accept(packet);
                 accepted++;
             }
 
             return Accepted(new BatchIngestResponse(accepted, rejected));
+        }
+
+        // The device spoke now, whatever the queue backlog: that is what the disconnect monitor watches.
+        private void Accept(Packet packet)
+        {
+            _pipeline.Enqueue(packet);
+            _registry.Update(packet.Mac, d => d with { LastSeen = packet.Timestamp });
         }
 
         // Validates a request against the live registry (O(1) MAC lookup), normalizes the typed value
