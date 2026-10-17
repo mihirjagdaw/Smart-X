@@ -12,6 +12,7 @@ namespace Smart_X.Api.Processing
         private readonly TelemetryPipeline _pipeline;
         private readonly DeviceRegistry _registry;
         private readonly TelemetryHistoryStore _store;
+        private readonly AlertTracker _alerts;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<TelemetryProcessorService> _logger;
         private readonly TimeSpan _standardDelay;
@@ -20,6 +21,7 @@ namespace Smart_X.Api.Processing
             TelemetryPipeline pipeline,
             DeviceRegistry registry,
             TelemetryHistoryStore store,
+            AlertTracker alerts,
             IServiceScopeFactory scopeFactory,
             IConfiguration configuration,
             ILogger<TelemetryProcessorService> logger)
@@ -27,6 +29,7 @@ namespace Smart_X.Api.Processing
             _pipeline = pipeline;
             _registry = registry;
             _store = store;
+            _alerts = alerts;
             _scopeFactory = scopeFactory;
             _logger = logger;
             _standardDelay = TimeSpan.FromMilliseconds(configuration.GetValue("Processing:StandardDelayMs", 100));
@@ -72,7 +75,20 @@ namespace Smart_X.Api.Processing
             db.TelemetryRecords.Add(new TelemetryRecord(0, packet.Mac, packet.Category, packet.Value, packet.Timestamp));
             await db.SaveChangesAsync();
 
-            _registry.Update(packet.Mac, d => d with { LastSeen = packet.Timestamp, LastValue = packet.Value });
+            // LastSeen is stamped when the packet arrives (see TelemetryController), not here, so a long
+            // backlog cannot make a device that is still sending look silent.
+            _registry.Update(packet.Mac, d => d with { LastValue = packet.Value });
+
+            if (packet.Rank == PacketRank.Critical)
+            {
+                _alerts.TryRaise(device.Mac, AlertType.Critical, $"{device.Description} reading {packet.Value:0.##} is outside the safe range");
+            }
+            else
+            {
+                _alerts.Clear(device.Mac, AlertType.Critical, $"{device.Description} is back in range ({packet.Value:0.##})");
+            }
+            _alerts.Clear(device.Mac, AlertType.Disconnected, $"{device.Description} reconnected");
+
             _pipeline.RecordProcessed(packet, lane);
         }
     }

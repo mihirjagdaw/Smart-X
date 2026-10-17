@@ -15,13 +15,15 @@ namespace Smart_X.Api.Controllers
         private readonly IWebHostEnvironment _environment;
         private readonly TelemetryHistoryStore _telemetryHistoryStore;
         private readonly DeviceRegistry _registry;
+        private readonly AlertTracker _alerts;
 
-        public SensorsController(AppDbContext dbContext, IWebHostEnvironment environment, TelemetryHistoryStore telemetryHistoryStore, DeviceRegistry registry)
+        public SensorsController(AppDbContext dbContext, IWebHostEnvironment environment, TelemetryHistoryStore telemetryHistoryStore, DeviceRegistry registry, AlertTracker alerts)
         {
             _dbContext = dbContext;
             _environment = environment;
             _telemetryHistoryStore = telemetryHistoryStore;
             _registry = registry;
+            _alerts = alerts;
         }
 
         [HttpPost]
@@ -102,6 +104,7 @@ namespace Smart_X.Api.Controllers
             sensor.IsActive = false;
             await _dbContext.SaveChangesAsync();
             _registry.Upsert(sensor);
+            _alerts.ClearDevice(sensor.MacAddress);
 
             return Ok(ToResponse(sensor));
         }
@@ -156,6 +159,7 @@ namespace Smart_X.Api.Controllers
             _dbContext.Sensors.Remove(sensor);
             await _dbContext.SaveChangesAsync();
             _registry.Remove(sensor.MacAddress);
+            _alerts.ClearDevice(sensor.MacAddress);
 
             return NoContent();
         }
