@@ -3,7 +3,7 @@ using Smart_X.Shared.DTOs;
 
 namespace Smart_X.Api.Processing
 {
-    public enum PacketRank { Critical = 0, Normal = 1 }
+    public enum PacketRank { Critical = 0, Command = 1, Normal = 2 }
 
     public enum Lane { Priority, Standard }
 
