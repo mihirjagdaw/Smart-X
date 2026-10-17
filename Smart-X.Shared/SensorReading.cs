@@ -11,11 +11,16 @@
         public DateTimeOffset Timestamp { get; }
 
         public SensorReading(string deviceId, SensorCategory category, float value)
+            : this(deviceId, category, value, DateTimeOffset.UtcNow)
+        {
+        }
+
+        public SensorReading(string deviceId, SensorCategory category, float value, DateTimeOffset timestamp)
         {
             DeviceId = deviceId;
             Category = category;
             Value = value;
-            Timestamp = DateTimeOffset.UtcNow;
+            Timestamp = timestamp;
         }
 
         public static SensorReading operator +(SensorReading a, SensorReading b)
