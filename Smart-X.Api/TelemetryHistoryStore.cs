@@ -5,8 +5,11 @@ namespace Smart_X.Api
     public class TelemetryHistoryStore
     {
         private const int HistoryCapacityPerDevice = 100;
+        private const int TimelineCapacityPerDevice = 500;
 
         private readonly Dictionary<string, SensorHistoryBuffer> _history = new();
+        // Ordered by timestamp on insert, so a timeline read never has to sort.
+        private readonly Dictionary<string, SortedDictionary<DateTimeOffset, SensorReading>> _timelines = new();
         // The processor, request threads and dashboard polling all touch this dictionary.
         private readonly object _lock = new();
 
@@ -41,6 +44,35 @@ namespace Smart_X.Api
                 }
 
                 buffer.Add(reading);
+
+                if (!_timelines.TryGetValue(reading.DeviceId, out var timeline))
+                {
+                    timeline = new SortedDictionary<DateTimeOffset, SensorReading>();
+                    _timelines[reading.DeviceId] = timeline;
+                }
+
+                // Two readings can share a timestamp; nudge the key rather than overwrite one.
+                var key = reading.Timestamp;
+                while (timeline.ContainsKey(key)) key = key.AddTicks(1);
+                timeline[key] = reading;
+
+                if (timeline.Count > TimelineCapacityPerDevice)
+                {
+                    timeline.Remove(timeline.Keys.First());
+                }
+            }
+        }
+
+        // shortcut: linear scan over at most TimelineCapacityPerDevice entries, because SortedDictionary
+        // has no range query; switch to SortedSet.GetViewBetween if windows over far larger histories are needed.
+        public List<SensorReading> GetTimeline(string deviceId, int minutes)
+        {
+            lock (_lock)
+            {
+                if (!_timelines.TryGetValue(deviceId, out var timeline)) return new List<SensorReading>();
+
+                var cutoff = DateTimeOffset.UtcNow.AddMinutes(-minutes);
+                return timeline.Where(entry => entry.Key >= cutoff).Select(entry => entry.Value).ToList();
             }
         }
 
@@ -69,6 +101,7 @@ namespace Smart_X.Api
             lock (_lock)
             {
                 _history.Remove(deviceId);
+                _timelines.Remove(deviceId);
             }
         }
 

@@ -121,6 +121,17 @@ namespace Smart_X.Api.Controllers
             return Ok(_telemetryHistoryStore.GetHistory(deviceId));
         }
 
+        [HttpGet("{deviceId}/timeline")]
+        public IActionResult GetTimeline(string deviceId, int minutes = 30)
+        {
+            if (minutes < 1 || minutes > 1440)
+            {
+                return BadRequest("minutes must be between 1 and 1440.");
+            }
+
+            return Ok(_telemetryHistoryStore.GetTimeline(deviceId, minutes));
+        }
+
         [HttpGet]
         public IActionResult GetAllLatestReadings()
         {
