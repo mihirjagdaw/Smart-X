@@ -1,67 +1,78 @@
-using Microsoft.EntityFrameworkCore;
-using Smart_X.Api.Data;
+using System.Net.Http.Json;
+using Smart_X.Api.Processing;
 using Smart_X.Shared;
+using Smart_X.Shared.DTOs;
 
 namespace Smart_X.Api
 {
     /// <summary>
-    /// A background service that simulates telemetry data for active sensors in the system. 
-    /// It periodically generates new telemetry readings based on the sensor category and stores them in both the database and an in-memory history store.
+    /// A background service that plays the part of the physical devices. Every tick it drifts each active
+    /// sensor's value and posts the readings to the API's own batch endpoint over HTTP, so simulated data
+    /// takes exactly the same path (validation, queueing, processing) as data from a real device.
     /// </summary>
     public class TelemetrySimulatorService : BackgroundService
     {
         private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(5);
 
-        private readonly IServiceScopeFactory _scopeFactory;
-        private readonly TelemetryHistoryStore _historyStore;
+        private readonly DeviceRegistry _registry;
+        private readonly ILogger<TelemetrySimulatorService> _logger;
+        private readonly HttpClient _http;
         private readonly Random _random = new();
         private readonly Dictionary<string, float> _lastValues = new();
 
-        public TelemetrySimulatorService(IServiceScopeFactory scopeFactory, TelemetryHistoryStore historyStore)
+        public TelemetrySimulatorService(DeviceRegistry registry, IConfiguration configuration, ILogger<TelemetrySimulatorService> logger)
         {
-            _scopeFactory = scopeFactory;
-            _historyStore = historyStore;
+            _registry = registry;
+            _logger = logger;
+            _http = new HttpClient { BaseAddress = new Uri(configuration["Simulator:ApiBaseUrl"] ?? "http://localhost:5256") };
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                // Delay first so the web server is listening before the first post.
+                await Task.Delay(TickInterval, stoppingToken);
+
                 try
                 {
-                    await Tick();
+                    await Tick(stoppingToken);
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-
+                    _logger.LogWarning(ex, "Simulator tick failed; retrying next tick");
                 }
-
-                await Task.Delay(TickInterval, stoppingToken);
             }
         }
 
-        private async Task Tick()
+        private async Task Tick(CancellationToken cancellationToken)
         {
-            using var scope = _scopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var requests = new List<TelemetryIngestRequest>();
 
-            var activeSensors = await dbContext.Sensors.Where(s => s.IsActive).ToListAsync();
-
-            foreach (var sensor in activeSensors)
+            foreach (var device in _registry.Snapshot().Where(d => d.IsActive))
             {
-                var previous = _lastValues.TryGetValue(sensor.MacAddress, out var lastValue)
+                var previous = _lastValues.TryGetValue(device.Mac, out var lastValue)
                     ? lastValue
-                    : GetStartingValue(sensor.Category);
+                    : GetStartingValue(device.Category);
 
-                var next = Drift(sensor.Category, previous);
-                _lastValues[sensor.MacAddress] = next;
-
-                _historyStore.AddBatch(sensor.MacAddress, sensor.Category, new[] { next });
-                dbContext.TelemetryRecords.Add(new TelemetryRecord(0, sensor.MacAddress, sensor.Category, next, DateTimeOffset.UtcNow));
+                var next = Drift(device.Category, previous);
+                _lastValues[device.Mac] = next;
+                requests.Add(ToRequest(device, next));
             }
 
-            await dbContext.SaveChangesAsync();
+            if (requests.Count == 0) return;
+
+            var response = await _http.PostAsJsonAsync("api/Telemetry/batch", requests, cancellationToken);
+            response.EnsureSuccessStatusCode();
         }
+
+        // Devices report in the value type their category uses: float, int or on/off.
+        private static TelemetryIngestRequest ToRequest(DeviceState device, float value) => device.Category switch
+        {
+            SensorCategory.PowerConsumption => new(device.Mac, device.Category, "int", null, (int)Math.Round(value), null),
+            SensorCategory.Actuator => new(device.Mac, device.Category, "bool", null, null, value >= 1f),
+            _ => new(device.Mac, device.Category, "float", value, null, null)
+        };
 
         private static float GetStartingValue(SensorCategory category) => category switch
         {
@@ -78,8 +89,9 @@ namespace Smart_X.Api
                 return _random.NextDouble() < 0.1 ? (previous == 0f ? 1f : 0f) : previous;
             }
 
-            var delta = (float)(_random.NextDouble() - 0.5);
-            var next = previous + delta;
+            // Power readings are whole watts, so they need a bigger step than a 0-100 reading to move visibly.
+            var step = category == SensorCategory.PowerConsumption ? 20f : 1f;
+            var next = previous + (float)(_random.NextDouble() - 0.5) * step;
 
             return category switch
             {
@@ -87,6 +99,12 @@ namespace Smart_X.Api
                 SensorCategory.PowerConsumption => Math.Clamp(next, 0f, 3000f),
                 _ => next
             };
+        }
+
+        public override void Dispose()
+        {
+            _http.Dispose();
+            base.Dispose();
         }
     }
 }

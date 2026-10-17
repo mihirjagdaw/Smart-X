@@ -1,5 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Smart_X.Api.Data;
+using Smart_X.Api.Processing;
 using Smart_X.Shared;
 using Smart_X.Shared.DTOs;
 
@@ -9,18 +9,72 @@ namespace Smart_X.Api.Controllers
     [Route("api/[controller]")]
     public class TelemetryController : ControllerBase
     {
-        private readonly AppDbContext _dbContext;
-        private readonly TelemetryHistoryStore _telemetryHistoryStore;
+        private const int MaxBatchSize = 500;
 
-        public TelemetryController(AppDbContext dbContext, TelemetryHistoryStore telemetryHistoryStore)
+        private readonly TelemetryHistoryStore _telemetryHistoryStore;
+        private readonly DeviceRegistry _registry;
+        private readonly TelemetryPipeline _pipeline;
+
+        public TelemetryController(TelemetryHistoryStore telemetryHistoryStore, DeviceRegistry registry, TelemetryPipeline pipeline)
         {
-            _dbContext = dbContext;
             _telemetryHistoryStore = telemetryHistoryStore;
+            _registry = registry;
+            _pipeline = pipeline;
         }
 
         [HttpPost]
-        public async Task<IActionResult> IngestTelemetry(TelemetryIngestRequest request)
+        public IActionResult IngestTelemetry(TelemetryIngestRequest request)
         {
+            var (packet, error, status) = BuildPacket(request);
+            if (packet is null)
+            {
+                return StatusCode(status, error);
+            }
+
+            _pipeline.Enqueue(packet);
+            return Accepted(new SensorReadingResponse(packet.Mac, packet.Category, packet.Value, packet.Timestamp));
+        }
+
+        [HttpPost("batch")]
+        public IActionResult IngestBatch(List<TelemetryIngestRequest> requests)
+        {
+            if (requests.Count > MaxBatchSize)
+            {
+                return BadRequest($"A batch can hold at most {MaxBatchSize} readings.");
+            }
+
+            var accepted = 0;
+            var rejected = new List<string>();
+            foreach (var request in requests)
+            {
+                var (packet, error, _) = BuildPacket(request);
+                if (packet is null)
+                {
+                    rejected.Add($"{request.DeviceId}: {error}");
+                    continue;
+                }
+
+                _pipeline.Enqueue(packet);
+                accepted++;
+            }
+
+            return Accepted(new BatchIngestResponse(accepted, rejected));
+        }
+
+        // Validates a request against the live registry (O(1) MAC lookup), normalizes the typed value
+        // through the generic TelemetryPacket<T>, and ranks it: critical readings jump the queue.
+        private (Packet? Packet, string? Error, int Status) BuildPacket(TelemetryIngestRequest request)
+        {
+            if (!_registry.TryGet(request.DeviceId, out var device))
+            {
+                return (null, $"Device {request.DeviceId} is not registered.", StatusCodes.Status404NotFound);
+            }
+
+            if (!device.IsActive)
+            {
+                return (null, $"Device {request.DeviceId} is deactivated.", StatusCodes.Status400BadRequest);
+            }
+
             float normalizedValue;
 
             switch (request.ValueType)
@@ -28,7 +82,7 @@ namespace Smart_X.Api.Controllers
                 case "float":
                     if (request.FloatValue is not float floatValue)
                     {
-                        return BadRequest("ValueType is 'float' but FloatValue was not provided.");
+                        return (null, "ValueType is 'float' but FloatValue was not provided.", StatusCodes.Status400BadRequest);
                     }
                     var floatPacket = new TelemetryPacket<float>(request.DeviceId, request.Category, floatValue);
                     normalizedValue = floatPacket.Value;
@@ -36,7 +90,7 @@ namespace Smart_X.Api.Controllers
                 case "int":
                     if (request.IntValue is not int intValue)
                     {
-                        return BadRequest("ValueType is 'int' but IntValue was not provided.");
+                        return (null, "ValueType is 'int' but IntValue was not provided.", StatusCodes.Status400BadRequest);
                     }
                     var intPacket = new TelemetryPacket<int>(request.DeviceId, request.Category, intValue);
                     normalizedValue = (float)intPacket.Value;
@@ -44,21 +98,21 @@ namespace Smart_X.Api.Controllers
                 case "bool":
                     if (request.BoolValue is not bool boolValue)
                     {
-                        return BadRequest("ValueType is 'bool' but BoolValue was not provided.");
+                        return (null, "ValueType is 'bool' but BoolValue was not provided.", StatusCodes.Status400BadRequest);
                     }
                     var boolPacket = new TelemetryPacket<bool>(request.DeviceId, request.Category, boolValue);
                     normalizedValue = System.Convert.ToSingle(boolPacket.Value);
                     break;
                 default:
-                    return BadRequest("Invalid ValueType");
+                    return (null, "Invalid ValueType", StatusCodes.Status400BadRequest);
             }
 
-            var reading = new SensorReading(request.DeviceId, request.Category, normalizedValue);
-            _telemetryHistoryStore.AddBatch(request.DeviceId, request.Category, new[] { reading.Value });
-            var record = new TelemetryRecord(0, request.DeviceId, request.Category, reading.Value, reading.Timestamp);
-            _dbContext.TelemetryRecords.Add(record);
-            await _dbContext.SaveChangesAsync();
-            return Ok(reading);
+            // The registry is the source of truth for MAC casing and category, not the request body.
+            var rank = AlertRules.Evaluate(device.Category, normalizedValue) == Severity.Critical
+                ? PacketRank.Critical
+                : PacketRank.Normal;
+
+            return (new Packet(device.Mac, device.Category, normalizedValue, DateTimeOffset.UtcNow, rank), null, 0);
         }
 
         [HttpGet("{deviceId}")]

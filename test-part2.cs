@@ -1,0 +1,52 @@
+#:project Smart-X.Api/Smart-X.Api.csproj
+using Smart_X.Api.Data;
+using Smart_X.Api.Processing;
+using Smart_X.Shared;
+
+int failures = 0;
+
+void Check(string label, bool ok, string detail = "")
+{
+    Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {label}{(ok || detail == "" ? "" : "  -> " + detail)}");
+    if (!ok) failures++;
+}
+
+Packet Make(string mac, float value, PacketRank rank) =>
+    new(mac, SensorCategory.Environmental, value, DateTimeOffset.UtcNow, rank);
+
+// --- DeviceRegistry: MAC lookups are case-insensitive, entries come back as snapshots ---
+var registry = new DeviceRegistry();
+registry.Upsert(new SensorProfile(0, "AA:BB:CC:01", "Estate/Block A", SensorCategory.Environmental, "Moisture", DateTimeOffset.UtcNow, true));
+Check("registry finds a MAC regardless of case", registry.TryGet("aa:bb:cc:01", out var found) && found.Mac == "AA:BB:CC:01");
+Check("registry misses an unknown MAC", !registry.TryGet("FF:FF:FF:FF", out _));
+registry.Update("AA:BB:CC:01", d => d with { LastValue = 42f });
+Check("registry update is visible to the next reader", registry.TryGet("AA:BB:CC:01", out var updated) && updated.LastValue == 42f);
+registry.Remove("AA:BB:CC:01");
+Check("registry removes a device", !registry.TryGet("AA:BB:CC:01", out _));
+
+// --- TelemetryPipeline: normal packets stay FIFO, a late critical packet overtakes the backlog ---
+var pipeline = new TelemetryPipeline();
+for (var i = 1; i <= 5; i++) pipeline.Enqueue(Make("N", i, PacketRank.Normal));
+pipeline.Enqueue(Make("C1", 99, PacketRank.Critical));
+pipeline.Enqueue(Make("C2", 98, PacketRank.Critical));
+
+var order = new List<string>();
+for (var i = 0; i < 7; i++)
+{
+    var (packet, lane) = await pipeline.DequeueAsync(CancellationToken.None);
+    order.Add($"{packet.Mac}:{packet.Value}:{lane}");
+}
+
+Check("critical packets dequeue first, in arrival order",
+    order[0] == "C1:99:Priority" && order[1] == "C2:98:Priority", string.Join(" ", order));
+Check("normal packets keep FIFO order behind them",
+    string.Join(",", order.Skip(2)) == "N:1:Standard,N:2:Standard,N:3:Standard,N:4:Standard,N:5:Standard", string.Join(" ", order));
+
+pipeline.Enqueue(Make("N", 6, PacketRank.Normal));
+pipeline.Enqueue(Make("C3", 97, PacketRank.Critical));
+var stats = pipeline.GetStats();
+Check("stats report per-lane depth", stats.StandardDepth == 1 && stats.PriorityDepth == 1, $"{stats.StandardDepth}/{stats.PriorityDepth}");
+
+Console.WriteLine();
+Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
+return failures == 0 ? 0 : 1;
