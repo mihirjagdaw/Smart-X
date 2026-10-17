@@ -53,9 +53,10 @@ namespace Smart_X.Api
             foreach (var device in _registry.Snapshot().Where(d => d.IsActive && !_control.IsOffline(d.Mac)))
             {
                 // Drift from the last accepted reading, including manual ones, so an injected value sticks
-                // the way a real device's would instead of snapping back to a private baseline.
+                // the way a real device's would instead of snapping back to a private baseline. A manual
+                // override holds the device at the commanded state until it is undone.
                 var previous = device.LastValue ?? GetStartingValue(device.Category);
-                requests.Add(ToRequest(device, Drift(device.Category, previous)));
+                requests.Add(ToRequest(device, device.OverrideValue ?? Drift(device.Category, previous)));
             }
 
             if (requests.Count == 0) return;
