@@ -54,6 +54,16 @@ namespace Smart_X.Api.Processing
             }
         }
 
+        public bool Update(string mac, Func<DeviceState, DeviceState> change)
+        {
+            lock (_lock)
+            {
+                if (!_devices.TryGetValue(mac, out var current)) return false;
+                _devices[mac] = change(current);
+                return true;
+            }
+        }
+
         public bool TryGet(string mac, out DeviceState state)
         {
             lock (_lock)

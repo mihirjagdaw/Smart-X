@@ -15,6 +15,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddSingleton<TelemetryHistoryStore>();
 builder.Services.AddSingleton<DeviceRegistry>();
+builder.Services.AddSingleton<TelemetryPipeline>();
+builder.Services.AddHostedService<TelemetryProcessorService>();
 builder.Services.AddHostedService<TelemetrySimulatorService>();
 
 builder.Services.AddCors(options =>
