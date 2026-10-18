@@ -41,7 +41,7 @@ namespace Smart_X.Api.Controllers
             }
 
             var action = request.On ? "Turn ON" : "Turn OFF";
-            return Ok(ToResponse(Apply(new List<DeviceState> { device }, request.On, $"{action} {device.Description}")));
+            return Ok(Apply(new List<DeviceState> { device }, request.On, $"{action} {device.Description}").ToResponse());
         }
 
         [HttpPost("all-off")]
@@ -53,7 +53,7 @@ namespace Smart_X.Api.Controllers
                 return NotFound("There are no active actuators to shut down.");
             }
 
-            return Ok(ToResponse(Apply(targets, on: false, $"Shut down all actuators ({targets.Count})")));
+            return Ok(Apply(targets, on: false, $"Shut down all actuators ({targets.Count})").ToResponse());
         }
 
         [HttpPost("undo")]
@@ -70,13 +70,13 @@ namespace Smart_X.Api.Controllers
                 Revert(change);
             }
 
-            return Ok(ToResponse(record));
+            return Ok(record.ToResponse());
         }
 
         [HttpGet]
         public IActionResult GetHistory()
         {
-            return Ok(_history.Snapshot().Select(ToResponse).ToList());
+            return Ok(_history.Snapshot().Select(c => c.ToResponse()).ToList());
         }
 
         // Holds each device at the commanded state (the simulator honours OverrideValue) and queues a
@@ -106,7 +106,5 @@ namespace Smart_X.Api.Controllers
             _pipeline.Enqueue(new Packet(device.Mac, device.Category, change.PreviousValue ?? 0f, DateTimeOffset.UtcNow, PacketRank.Command));
         }
 
-        private static CommandResponse ToResponse(CommandRecord record) =>
-            new(record.Id, record.Description, record.At, record.Changes.Select(c => c.Mac).ToList());
     }
 }
