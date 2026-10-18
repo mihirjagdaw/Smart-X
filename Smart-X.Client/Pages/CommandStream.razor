@@ -1,0 +1,606 @@
+@page "/command-stream"
+@using System.Net.Http.Json
+@using Smart_X.Client.Components
+@using Smart_X.Client.Services
+@using Smart_X.Shared
+@using Smart_X.Shared.DTOs
+@implements IDisposable
+@inject HttpClient Http
+@inject LiveDataService LiveData
+@inject AppState State
+
+<PageTitle>Real-Time Command Stream</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="mb-0">Real-Time Command Stream and History</h1>
+    <span class="small @(LiveData.Error is null ? "text-success" : "text-danger")" role="status">@StatusText</span>
+</div>
+
+@if (message is not null)
+{
+    <div class="alert @(messageIsError ? "alert-danger" : "alert-success") py-2 d-flex justify-content-between align-items-center" role="alert">
+        <span>@message</span>
+        <button type="button" class="btn-close" aria-label="Dismiss message" @onclick="() => message = null"></button>
+    </div>
+}
+
+@if (Snap is null)
+{
+    <p class="text-muted">Loading the live stream...</p>
+}
+else
+{
+    <div class="row g-3 mb-3">
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Suggested Actions</h5>
+                    @if (Snap.Insights.SuggestedActions.Count == 0)
+                    {
+                        <p class="text-muted small">Nothing to suggest right now. Suggestions appear once the same reaction to an alert has been seen a couple of times.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush mb-3">
+                            @foreach (var suggestion in Snap.Insights.SuggestedActions)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div>
+                                        <strong>@suggestion.Text</strong>
+                                        <div class="small text-muted">@suggestion.Reason</div>
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-primary ms-3" disabled="@busy" @onclick="() => Apply(suggestion)">Apply</button>
+                                </li>
+                            }
+                        </ul>
+                    }
+
+                    <h5 class="card-title">Automated Insights</h5>
+                    @if (Snap.Insights.Warnings.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">No devices look problematic.</p>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var warning in Snap.Insights.Warnings)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action px-0" @onclick="() => SelectAsync(warning.Mac)">
+                                    <span class="badge @SeverityClass(warning.Severity) me-2">@warning.Severity</span>
+                                    <strong>@warning.Description</strong>
+                                    <span class="text-muted">@warning.Message</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Active Alerts</h5>
+                    @if (Snap.Alerts.Active.Count == 0)
+                    {
+                        <p class="text-muted small">No active alerts.</p>
+                    }
+                    else
+                    {
+                        @foreach (var alert in Snap.Alerts.Active)
+                        {
+                            <div class="d-flex justify-content-between mb-1">
+                                <span>@NameOf(alert.Mac)</span>
+                                <span class="badge @(alert.Type == "Critical" ? "bg-danger" : "bg-warning text-dark")">@alert.Type</span>
+                            </div>
+                        }
+                    }
+                    <p class="small text-muted mt-2 mb-1">Duplicate alerts suppressed: <strong>@Snap.Alerts.Suppressed</strong></p>
+
+                    <h6 class="mt-3">Recent alert activity</h6>
+                    @if (Snap.Alerts.Recent.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Nothing yet.</p>
+                    }
+                    @foreach (var entry in Snap.Alerts.Recent.Take(5))
+                    {
+                        <div class="small">
+                            <span class="text-muted">@entry.At.ToLocalTime().ToString("HH:mm:ss")</span>
+                            @(entry.Raised ? "Raised" : "Cleared"): @entry.Message
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="card-title mb-0">Devices</h5>
+                <span class="small text-muted">@LiveData.Results.Count of @Snap.Devices.Count active devices</span>
+            </div>
+
+            <div class="row g-2 mb-3">
+                <div class="col-md-5">
+                    <label class="visually-hidden" for="deviceSearch">Search devices</label>
+                    <input id="deviceSearch" class="form-control" placeholder="Search by name or location, e.g. pump a" value="@State.Query" @oninput="OnQueryInput" />
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" aria-label="Filter by category" @onchange="OnCategoryChanged">
+                        <option value="" selected="@(State.Category is null)">All categories</option>
+                        @foreach (var category in Enum.GetValues<SensorCategory>())
+                        {
+                            <option value="@category" selected="@(State.Category == category)">@category</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" aria-label="Filter by alert state" @onchange="OnAlertChanged">
+                        <option value="" selected="@(State.Alert is null)">Any alert state</option>
+                        <option value="Any" selected="@(State.Alert == AlertFilter.Any)">Has any alert</option>
+                        <option value="Critical" selected="@(State.Alert == AlertFilter.Critical)">Critical</option>
+                        <option value="Disconnected" selected="@(State.Alert == AlertFilter.Disconnected)">Disconnected</option>
+                        <option value="None" selected="@(State.Alert == AlertFilter.None)">No alerts</option>
+                    </select>
+                </div>
+                <div class="col-md-1 d-grid">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="ClearFilters">Clear</button>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Location</th>
+                            <th>Category</th>
+                            <th>Value</th>
+                            <th>Last seen</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (LiveData.Results.Count == 0)
+                        {
+                            <tr><td colspan="7" class="text-center text-muted">No devices match.</td></tr>
+                        }
+                        @foreach (var device in LiveData.Results)
+                        {
+                            <tr class="@(device.Mac == State.SelectedMac ? "table-active" : null)" style="cursor: pointer;" @onclick="() => SelectAsync(device.Mac)">
+                                <td>
+                                    <div>@device.Description</div>
+                                    <div class="small text-muted">@device.Mac</div>
+                                </td>
+                                <td>@device.Location</td>
+                                <td>@device.Category</td>
+                                <td>@FormatValue(device)</td>
+                                <td>@Age(device.LastSeen)</td>
+                                <td>
+                                    @foreach (var alertType in device.Alerts)
+                                    {
+                                        <span class="badge @(alertType == "Critical" ? "bg-danger" : "bg-warning text-dark") me-1">@alertType</span>
+                                    }
+                                    @if (device.Overridden)
+                                    {
+                                        <span class="badge bg-info text-dark">Manual override</span>
+                                    }
+                                </td>
+                                <td class="text-end text-nowrap">
+                                    @if (device.Category == SensorCategory.Actuator)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-success" disabled="@busy" @onclick="() => IssueCommand(device.Mac, true)" @onclick:stopPropagation="true">On</button>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@busy" @onclick="() => IssueCommand(device.Mac, false)" @onclick:stopPropagation="true">Off</button>
+                                    }
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => SelectAsync(device.Mac)" @onclick:stopPropagation="true">View</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-lg-8">
+            <div class="card h-100">
+                <div class="card-body">
+                    @if (Selected is null)
+                    {
+                        <h5 class="card-title">Device timeline</h5>
+                        <p class="text-muted mb-0">Select a device in the table to see its timeline and use the simulation tools.</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h5 class="card-title mb-0">@Selected.Description <small class="text-muted">@Selected.Mac</small></h5>
+                            <select class="form-select form-select-sm w-auto" aria-label="Timeline window" @onchange="OnWindowChanged">
+                                <option value="1" selected="@(State.TimelineMinutes == 1)">Last minute</option>
+                                <option value="5" selected="@(State.TimelineMinutes == 5)">Last 5 minutes</option>
+                                <option value="30" selected="@(State.TimelineMinutes == 30)">Last 30 minutes</option>
+                            </select>
+                        </div>
+                        <TimelineChart Points="LiveData.Timeline" Category="Selected.Category" Label="@Selected.Description" />
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Simulation tools</h5>
+                    @if (Selected is null)
+                    {
+                        <p class="text-muted small mb-0">Select a device to act as it and see how the system reacts.</p>
+                    }
+                    else
+                    {
+                        <p class="small text-muted">Acting as <strong>@Selected.Description</strong>.</p>
+                        <div class="d-grid gap-2">
+                            @if (Selected.Category != SensorCategory.Actuator)
+                            {
+                                <button type="button" class="btn btn-outline-danger" disabled="@busy" @onclick="SimulateCritical">Send a critical reading</button>
+                                <button type="button" class="btn btn-outline-success" disabled="@busy" @onclick="SimulateNormal">Send a normal reading</button>
+                                <button type="button" class="btn btn-outline-primary" disabled="@busy" @onclick="SimulateBurst">Burst: 40 normal + 1 critical</button>
+                                <button type="button" class="btn btn-outline-primary" disabled="@busy" @onclick="SimulateTrend">@(Selected.Category == SensorCategory.PowerConsumption ? "Rising trend (12 readings)" : "Falling trend (12 readings)")</button>
+                            }
+                            <button type="button" class="btn btn-outline-secondary" disabled="@busy" @onclick="ToggleOffline">Toggle simulated offline</button>
+                        </div>
+                        @if (simStatus is not null)
+                        {
+                            <p class="small mt-2 mb-0" role="status">@simStatus</p>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Ingest queues</h5>
+                    <div class="d-flex flex-wrap gap-4 mb-3">
+                        <div>
+                            <span class="badge bg-danger">Priority lane</span>
+                            <div class="small">waiting <strong>@Snap.Stats.PriorityDepth</strong>, processed <strong>@Snap.Stats.ProcessedPriority</strong></div>
+                        </div>
+                        <div>
+                            <span class="badge bg-secondary">Standard lane (FIFO)</span>
+                            <div class="small">waiting <strong>@Snap.Stats.StandardDepth</strong>, processed <strong>@Snap.Stats.ProcessedStandard</strong></div>
+                        </div>
+                        <div>
+                            <span class="badge bg-light text-dark border">Dropped</span>
+                            <div class="small"><strong>@Snap.Stats.Dropped</strong></div>
+                        </div>
+                    </div>
+
+                    <h6>Processing feed</h6>
+                    <div class="table-responsive" style="max-height: 280px; overflow-y: auto;">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr><th>#</th><th>Lane</th><th>Device</th><th>Value</th><th>Waited</th></tr>
+                            </thead>
+                            <tbody>
+                                @if (Snap.Recent.Count == 0)
+                                {
+                                    <tr><td colspan="5" class="text-muted">Waiting for readings...</td></tr>
+                                }
+                                @foreach (var item in Snap.Recent)
+                                {
+                                    <tr>
+                                        <td>@item.Order</td>
+                                        <td><span class="badge @(item.Lane == "Priority" ? "bg-danger" : "bg-secondary")">@item.Lane</span></td>
+                                        <td>@NameOf(item.Mac)</td>
+                                        <td>@item.Value.ToString("0.##")</td>
+                                        <td>@Waited(item)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Commands</h5>
+                    <div class="d-flex gap-2 mb-3">
+                        <button type="button" class="btn btn-danger" disabled="@busy" @onclick="ShutDownAll">Shut down all actuators</button>
+                        <button type="button" class="btn btn-outline-secondary" disabled="@(busy || Snap.Commands.Count == 0)" @onclick="Undo">Undo last command</button>
+                    </div>
+
+                    @if (Snap.Commands.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">No commands to undo.</p>
+                    }
+                    else
+                    {
+                        <ol class="list-group list-group-numbered">
+                            @foreach (var command in Snap.Commands)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-start">
+                                    <div class="ms-2 me-auto">
+                                        <div>@command.Description</div>
+                                        <div class="small text-muted">@command.At.ToLocalTime().ToString("HH:mm:ss")</div>
+                                    </div>
+                                    @if (command == Snap.Commands[0])
+                                    {
+                                        <span class="badge bg-secondary">next to undo</span>
+                                    }
+                                </li>
+                            }
+                        </ol>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool busy;
+    private bool disposed;
+    private string? message;
+    private bool messageIsError;
+    private string? simStatus;
+    private CancellationTokenSource? debounce;
+
+    private StreamSnapshot? Snap => LiveData.Snapshot;
+
+    private DeviceSummary? Selected => Snap?.Devices.FirstOrDefault(d => d.Mac == State.SelectedMac);
+
+    private string StatusText => LiveData.Error
+        ?? (LiveData.UpdatedAt is { } at ? $"Live, updated {at:HH:mm:ss}" : "Connecting...");
+
+    protected override void OnInitialized() => LiveData.Changed += OnLiveDataChanged;
+
+    private void OnLiveDataChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        disposed = true;
+        debounce?.Cancel();
+        LiveData.Changed -= OnLiveDataChanged;
+    }
+
+    // ---- search and filters ----
+
+    private async Task OnQueryInput(ChangeEventArgs e)
+    {
+        State.Query = e.Value?.ToString() ?? "";
+
+        // Wait for a pause in typing, so one search is remembered rather than every keystroke.
+        debounce?.Cancel();
+        debounce = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(350, debounce.Token);
+            await LiveData.ApplyFilterAsync();
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private async Task OnCategoryChanged(ChangeEventArgs e)
+    {
+        State.Category = Enum.TryParse<SensorCategory>(e.Value?.ToString(), out var category) ? category : null;
+        await LiveData.ApplyFilterAsync();
+    }
+
+    private async Task OnAlertChanged(ChangeEventArgs e)
+    {
+        State.Alert = Enum.TryParse<AlertFilter>(e.Value?.ToString(), out var alert) ? alert : null;
+        await LiveData.ApplyFilterAsync();
+    }
+
+    private async Task ClearFilters()
+    {
+        State.Query = "";
+        State.Category = null;
+        State.Alert = null;
+        await LiveData.ApplyFilterAsync();
+    }
+
+    private Task SelectAsync(string mac) => LiveData.SelectDeviceAsync(mac);
+
+    private async Task OnWindowChanged(ChangeEventArgs e)
+    {
+        State.TimelineMinutes = int.TryParse(e.Value?.ToString(), out var minutes) ? minutes : 5;
+        await LiveData.SelectDeviceAsync(State.SelectedMac);
+    }
+
+    // ---- commands ----
+
+    private Task IssueCommand(string mac, bool on) => RunAsync(async () =>
+    {
+        var response = await Http.PostAsJsonAsync("api/Commands", new CommandRequest(mac, on));
+        await ReportAsync(response);
+    });
+
+    private Task ShutDownAll() => RunAsync(async () => await ReportAsync(await Http.PostAsync("api/Commands/all-off", null)));
+
+    private Task Undo() => RunAsync(async () =>
+    {
+        var response = await Http.PostAsync("api/Commands/undo", null);
+        await ReportAsync(response, prefix: "Undone: ");
+    });
+
+    private async Task Apply(Suggestion suggestion)
+    {
+        switch (suggestion.Kind)
+        {
+            case "RunCommand":
+                await IssueCommand(suggestion.DeviceId!, suggestion.Command == "on");
+                break;
+
+            case "ReviewDevice":
+                // Searching for the device is what the engine learned, so applying it counts as doing it.
+                State.Query = suggestion.DeviceId!;
+                await LiveData.SelectDeviceAsync(suggestion.DeviceId);
+                await LiveData.ApplyFilterAsync();
+                break;
+
+            case "SearchQuery":
+                State.Query = suggestion.Query ?? "";
+                await LiveData.ApplyFilterAsync();
+                break;
+        }
+    }
+
+    // ---- simulation tools: act as the selected device so the system's reactions can be seen ----
+
+    private Task SimulateCritical() => SimulateAsync(async device =>
+    {
+        await PostReading(device, CriticalValue(device.Category));
+        simStatus = "Critical reading sent. It takes the priority lane and raises an alert.";
+    });
+
+    private Task SimulateNormal() => SimulateAsync(async device =>
+    {
+        await PostReading(device, NormalValue(device.Category));
+        simStatus = "Normal reading sent. Any critical alert for this device clears.";
+    });
+
+    private Task SimulateBurst() => SimulateAsync(async device =>
+    {
+        var batch = new List<TelemetryIngestRequest>();
+        for (var i = 0; i < 40; i++)
+        {
+            batch.Add(Reading(device, NormalValue(device.Category) + (float)(Random.Shared.NextDouble() - 0.5) * 2f));
+        }
+        batch.Add(Reading(device, CriticalValue(device.Category)));
+
+        (await Http.PostAsJsonAsync("api/Telemetry/batch", batch)).EnsureSuccessStatusCode();
+        simStatus = "Sent 41 readings in one batch. The critical one went last, so watch it overtake the backlog in the Processing feed.";
+    });
+
+    private async Task SimulateTrend()
+    {
+        if (Selected is not { } device || busy) return;
+
+        busy = true;
+        try
+        {
+            var rising = device.Category == SensorCategory.PowerConsumption;
+            for (var i = 0; i < 12 && !disposed; i++)
+            {
+                await PostReading(device, rising ? 1200f + i * 150f : 45f - i * 2f);
+                simStatus = $"Sending trend reading {i + 1} of 12...";
+                StateHasChanged();
+                await Task.Delay(1000);
+            }
+            simStatus = "Trend sent. Automated Insights should flag it before it leaves the safe range.";
+        }
+        catch (Exception ex)
+        {
+            Show($"Simulation failed: {ex.Message}", error: true);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (!disposed) await LiveData.RefreshAsync();
+    }
+
+    private Task ToggleOffline() => SimulateAsync(async device =>
+    {
+        var response = await Http.PostAsync($"api/Devices/{Uri.EscapeDataString(device.Mac)}/simulate-offline", null);
+        var result = await response.Content.ReadFromJsonAsync<SimulatedOfflineResponse>();
+        simStatus = result is { Offline: true }
+            ? "Device is now simulated offline. A Disconnected alert follows after about 15 seconds."
+            : "Device is reporting again. The Disconnected alert clears on its next reading.";
+    });
+
+    private Task SimulateAsync(Func<DeviceSummary, Task> action) => RunAsync(async () =>
+    {
+        if (Selected is { } device) await action(device);
+    });
+
+    private async Task PostReading(DeviceSummary device, float value) =>
+        (await Http.PostAsJsonAsync("api/Telemetry", Reading(device, value))).EnsureSuccessStatusCode();
+
+    private static TelemetryIngestRequest Reading(DeviceSummary device, float value) =>
+        device.Category == SensorCategory.PowerConsumption
+            ? new TelemetryIngestRequest(device.Mac, device.Category, "int", null, (int)MathF.Round(value), null)
+            : new TelemetryIngestRequest(device.Mac, device.Category, "float", value, null, null);
+
+    private static float NormalValue(SensorCategory category) => category == SensorCategory.PowerConsumption ? 1200f : 45f;
+
+    private static float CriticalValue(SensorCategory category) =>
+        category == SensorCategory.PowerConsumption ? AlertRules.PowerMax + 500f : AlertRules.EnvironmentalMin - 15f;
+
+    // ---- shared plumbing ----
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        busy = true;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Show($"Something went wrong: {ex.Message}", error: true);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (!disposed) await LiveData.RefreshAsync();
+    }
+
+    private async Task ReportAsync(HttpResponseMessage response, string prefix = "Sent: ")
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            var command = await response.Content.ReadFromJsonAsync<CommandResponse>();
+            Show($"{prefix}{command?.Description}");
+            return;
+        }
+
+        var text = (await response.Content.ReadAsStringAsync()).Trim();
+        Show(text.Length > 0 ? text : $"The request failed ({(int)response.StatusCode}).", error: true);
+    }
+
+    private void Show(string text, bool error = false)
+    {
+        message = text;
+        messageIsError = error;
+    }
+
+    // ---- display helpers ----
+
+    private string NameOf(string mac) => Snap?.Devices.FirstOrDefault(d => d.Mac == mac)?.Description ?? mac;
+
+    private static string SeverityClass(string severity) => severity == "Critical" ? "bg-danger" : "bg-warning text-dark";
+
+    private static string FormatValue(DeviceSummary device) => device.Category == SensorCategory.Actuator
+        ? (device.LastValue >= 1f ? "ON" : "OFF")
+        : device.LastValue?.ToString("0.##") ?? "no data";
+
+    private static string Age(DateTimeOffset? lastSeen)
+    {
+        if (lastSeen is null) return "never";
+
+        var age = DateTimeOffset.UtcNow - lastSeen.Value;
+        if (age.TotalSeconds < 10) return "just now";
+        return age.TotalMinutes < 1 ? $"{(int)age.TotalSeconds}s ago" : $"{(int)age.TotalMinutes} min ago";
+    }
+
+    private static string Waited(ProcessedEvent item)
+    {
+        var waited = item.ProcessedAt - item.ArrivedAt;
+        return waited.TotalSeconds < 1 ? $"{waited.TotalMilliseconds:0} ms" : $"{waited.TotalSeconds:0.#} s";
+    }
+}
