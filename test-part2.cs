@@ -3,6 +3,7 @@ using Smart_X.Api;
 using Smart_X.Api.Data;
 using Smart_X.Api.Processing;
 using Smart_X.Shared;
+using Smart_X.Shared.DTOs;
 
 int failures = 0;
 
@@ -78,7 +79,7 @@ Check("removing a device clears its timeline", store.GetTimeline("T1", 60).Count
 Check("an unknown device has an empty timeline", store.GetTimeline("NOPE", 60).Count == 0);
 
 // --- AlertTracker: a HashSet keeps one alert per (device, type) however often it is reported ---
-var alerts = new AlertTracker();
+var alerts = new AlertTracker(new ActionHistory());
 Check("first raise of an alert is new", alerts.TryRaise("A1", AlertType.Disconnected, "offline"));
 Check("a repeat raise is suppressed", !alerts.TryRaise("A1", AlertType.Disconnected, "offline"));
 alerts.TryRaise("A1", AlertType.Disconnected, "offline");
@@ -123,6 +124,97 @@ Check("a bulk command reverts every device it touched with its previous state",
     undone!.Changes.Count == 3 && undone.Changes[0] == new DeviceChange("V1", 1f, 1f));
 Check("the earlier command is next", history.TryPop()?.Description == "Turn ON Valve 1");
 Check("history is empty again", history.TryPop() is null && history.Snapshot().Count == 0);
+
+// --- InsightEngine: learns "when Moisture B goes critical the operator turns Pump A on" ---
+var clockNow = DateTimeOffset.UtcNow;
+void Tick(int seconds) => clockNow = clockNow.AddSeconds(seconds);
+
+var insightRegistry = new DeviceRegistry();
+insightRegistry.Upsert(new SensorProfile(0, "B1", "Estate/Block B", SensorCategory.Environmental, "Moisture B", DateTimeOffset.UtcNow, true));
+insightRegistry.Upsert(new SensorProfile(0, "P1", "Estate/Pump House", SensorCategory.Actuator, "Pump A", DateTimeOffset.UtcNow, true));
+var insightStore = new TelemetryHistoryStore();
+
+// One alert occurrence: it fires, the operator may react, it clears, and a long gap follows.
+void Occurrence(ActionHistory history, AlertTracker tracker, bool operatorReacts)
+{
+    tracker.TryRaise("B1", AlertType.Critical, "too dry"); Tick(5);
+    if (operatorReacts) history.Record(ActionKey.Command("P1", true));
+    Tick(5);
+    tracker.Clear("B1", AlertType.Critical, "recovered"); Tick(300);
+}
+
+var actions = new ActionHistory(() => clockNow);
+var learnAlerts = new AlertTracker(actions);
+var engine = new InsightEngine(insightRegistry, learnAlerts, actions, insightStore);
+
+Occurrence(actions, learnAlerts, operatorReacts: true);
+learnAlerts.TryRaise("B1", AlertType.Critical, "too dry");
+Check("no suggestion after seeing the pattern only once", engine.Build().SuggestedActions.Count == 0);
+Tick(5); actions.Record(ActionKey.Command("P1", true)); Tick(5);
+learnAlerts.Clear("B1", AlertType.Critical, "recovered"); Tick(300);
+
+learnAlerts.TryRaise("B1", AlertType.Critical, "too dry");
+var learned = engine.Build().SuggestedActions;
+Check("the pattern is suggested the third time the alert fires",
+    learned.Count == 1 && learned[0].Kind == "RunCommand" && learned[0].Text == "Turn ON Pump A"
+    && learned[0].DeviceId == "P1" && learned[0].Command == "on", string.Join(" | ", learned.Select(s => s.Text)));
+Check("confidence is the share of earlier occurrences that followed the pattern",
+    learned.Count == 1 && learned[0].Confidence == 1.0 && learned[0].Reason.Contains("2 of 2"), learned.Count == 1 ? learned[0].Reason : "none");
+
+insightRegistry.Update("P1", d => d with { LastValue = 1f });
+Check("nothing is suggested when the pump is already on", engine.Build().SuggestedActions.Count == 0);
+insightRegistry.Update("P1", d => d with { LastValue = null });
+
+Tick(5); actions.Record(ActionKey.Command("P1", true));
+Check("nothing is suggested once the operator has acted on this alert", engine.Build().SuggestedActions.Count == 0);
+
+// A reaction that only happens 2 times in 5 is below the confidence bar.
+var weakActions = new ActionHistory(() => clockNow);
+var weakAlerts = new AlertTracker(weakActions);
+var weakEngine = new InsightEngine(insightRegistry, weakAlerts, weakActions, insightStore);
+foreach (var reacts in new[] { true, true, false, false, false }) Occurrence(weakActions, weakAlerts, reacts);
+weakAlerts.TryRaise("B1", AlertType.Critical, "too dry");
+Check("a habit seen in under half the occurrences is not suggested", weakEngine.Build().SuggestedActions.Count == 0);
+
+// Searches count as actions too: after Moisture B goes critical the operator always looks at Pump A.
+var searchActions = new ActionHistory(() => clockNow);
+var searchAlerts = new AlertTracker(searchActions);
+var searchEngine = new InsightEngine(insightRegistry, searchAlerts, searchActions, insightStore);
+for (var i = 0; i < 2; i++)
+{
+    searchAlerts.TryRaise("B1", AlertType.Critical, "too dry"); Tick(5);
+    searchActions.Record(ActionKey.Search("P1")); Tick(5);
+    searchAlerts.Clear("B1", AlertType.Critical, "recovered"); Tick(300);
+}
+searchAlerts.TryRaise("B1", AlertType.Critical, "too dry");
+Check("a learned search becomes a 'check this device' suggestion",
+    searchEngine.Build().SuggestedActions.Any(s => s.Kind == "ReviewDevice" && s.DeviceId == "P1" && s.Text == "Check Pump A"));
+
+// --- InsightEngine warnings: a clean downward trend, a steady device, a sudden spike, an actuator ---
+var warnRegistry = new DeviceRegistry();
+foreach (var mac in new[] { "FALL", "STEADY", "SPIKE", "ACT" })
+{
+    warnRegistry.Upsert(new SensorProfile(0, mac, "Estate", mac == "ACT" ? SensorCategory.Actuator : SensorCategory.Environmental, mac, DateTimeOffset.UtcNow, true));
+}
+var warnStore = new TelemetryHistoryStore();
+var seriesStart = DateTimeOffset.UtcNow.AddSeconds(-120);
+for (var i = 0; i < 12; i++)
+{
+    var when = seriesStart.AddSeconds(i * 5);
+    warnStore.Add(At("FALL", 45 - i * 2f, when));
+    warnStore.Add(At("STEADY", 45 + (i % 2 == 0 ? 0.2f : -0.2f), when));
+    warnStore.Add(At("SPIKE", i < 11 ? 45 + (i % 2 == 0 ? 0.1f : -0.1f) : 60f, when));
+    warnStore.Add(At("ACT", i % 2, when));
+}
+var warnHistory = new ActionHistory();
+var warnings = new InsightEngine(warnRegistry, new AlertTracker(warnHistory), warnHistory, warnStore).Build().Warnings;
+string[] For(string mac) => warnings.Where(w => w.Mac == mac).Select(w => w.Message).ToArray();
+
+Check("a steady fall towards the limit is flagged before it breaches",
+    For("FALL").Any(m => m.Contains("leave the safe range") && m.Contains("down")), string.Join(" | ", For("FALL")));
+Check("a device holding steady raises nothing", For("STEADY").Length == 0, string.Join(" | ", For("STEADY")));
+Check("a sudden spike is flagged as an unusual jump", For("SPIKE").Any(m => m.Contains("Unusual jump")), string.Join(" | ", For("SPIKE")));
+Check("an on/off device is never trend-checked", For("ACT").Length == 0);
 
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
