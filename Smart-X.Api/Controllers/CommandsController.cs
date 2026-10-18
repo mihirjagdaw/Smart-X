@@ -12,12 +12,14 @@ namespace Smart_X.Api.Controllers
         private readonly DeviceRegistry _registry;
         private readonly TelemetryPipeline _pipeline;
         private readonly CommandHistory _history;
+        private readonly ActionHistory _actions;
 
-        public CommandsController(DeviceRegistry registry, TelemetryPipeline pipeline, CommandHistory history)
+        public CommandsController(DeviceRegistry registry, TelemetryPipeline pipeline, CommandHistory history, ActionHistory actions)
         {
             _registry = registry;
             _pipeline = pipeline;
             _history = history;
+            _actions = actions;
         }
 
         [HttpPost]
@@ -89,6 +91,7 @@ namespace Smart_X.Api.Controllers
                 changes.Add(new DeviceChange(device.Mac, device.OverrideValue, device.LastValue));
                 _registry.Update(device.Mac, d => d with { OverrideValue = value });
                 _pipeline.Enqueue(new Packet(device.Mac, device.Category, value, DateTimeOffset.UtcNow, PacketRank.Command));
+                _actions.Record(ActionKey.Command(device.Mac, on));
             }
 
             return _history.Push(description, changes);
