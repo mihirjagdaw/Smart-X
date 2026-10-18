@@ -16,8 +16,14 @@ namespace Smart_X.Api.Processing
 
         private readonly HashSet<AlertKey> _active = new();
         private readonly Queue<AlertLogEntry> _log = new();
+        private readonly ActionHistory _actions;
         private readonly object _lock = new();
         private long _suppressed;
+
+        public AlertTracker(ActionHistory actions)
+        {
+            _actions = actions;
+        }
 
         // True only when the alert is new. A repeat is counted and dropped.
         public bool TryRaise(string mac, AlertType type, string message)
@@ -31,8 +37,11 @@ namespace Smart_X.Api.Processing
                 }
 
                 Log(mac, type, message, raised: true);
-                return true;
             }
+
+            // A new alert is something that happened, which the engine learns operator reactions from.
+            _actions.Record(ActionKey.Alert(mac, type.ToString()));
+            return true;
         }
 
         // True only when there was an active alert to clear.

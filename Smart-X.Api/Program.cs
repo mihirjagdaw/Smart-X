@@ -19,6 +19,8 @@ builder.Services.AddSingleton<TelemetryPipeline>();
 builder.Services.AddSingleton<AlertTracker>();
 builder.Services.AddSingleton<SimulatorControl>();
 builder.Services.AddSingleton<CommandHistory>();
+builder.Services.AddSingleton<ActionHistory>();
+builder.Services.AddSingleton<InsightEngine>();
 builder.Services.AddHostedService<TelemetryProcessorService>();
 builder.Services.AddHostedService<DisconnectMonitorService>();
 builder.Services.AddHostedService<TelemetrySimulatorService>();
