@@ -14,4 +14,4 @@ Smart-X.Api/uploads/
 docker-data/
 .idea/
 *.DotSettings.user
-demo-script.md
+demo-script*.md

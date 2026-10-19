@@ -7,6 +7,8 @@ A vineyard IoT telemetry system. Sensors (soil moisture, canopy temperature, pow
 
 **Part 1 demo video:** https://youtu.be/EgvMt7jgL68
 
+**Part 2 demo video:** https://youtu.be/-F49rAjtaYs
+
 ## Stack
 
 - **Smart-X.Api** — ASP.NET Core Web API + EF Core + SQLite
