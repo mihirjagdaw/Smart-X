@@ -1,4 +1,7 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
+﻿@implements IDisposable
+@inject Smart_X.Client.Services.LiveDataService LiveData
+
+<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">Smart-X.Client</a>
         <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
@@ -15,8 +18,27 @@
             </NavLink>
         </div>
         <div class="nav-item px-3">
+            <NavLink class="nav-link" href="ingestion">
+                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Sensor Data Ingestion and Telemetry
+            </NavLink>
+        </div>
+        <div class="nav-item px-3 ps-4">
             <NavLink class="nav-link" href="sensors">
                 <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Manage Sensors
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="command-stream">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Real-Time Command Stream and History
+                @if (ActiveAlertCount > 0)
+                {
+                    <span class="badge bg-danger ms-2" title="Active alerts">@ActiveAlertCount</span>
+                }
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="topology">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Network Topology and Mesh Routing
             </NavLink>
         </div>
     </nav>
@@ -27,8 +49,16 @@
 
     private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
 
+    private int ActiveAlertCount => LiveData.Snapshot?.Alerts.Active.Count ?? 0;
+
+    protected override void OnInitialized() => LiveData.Changed += OnLiveDataChanged;
+
+    private void OnLiveDataChanged() => _ = InvokeAsync(StateHasChanged);
+
     private void ToggleNavMenu()
     {
         collapseNavMenu = !collapseNavMenu;
     }
+
+    public void Dispose() => LiveData.Changed -= OnLiveDataChanged;
 }

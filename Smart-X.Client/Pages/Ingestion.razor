@@ -3,8 +3,10 @@
 @using Smart_X.Shared
 @using Smart_X.Shared.DTOs
 @using Smart_X.Client.Models
+@using Smart_X.Client.Services
 @implements IDisposable
 @inject HttpClient Http
+@inject AppState State
 
 <PageTitle>Sensor Ingestion</PageTitle>
 
@@ -284,8 +286,14 @@
 </div>
 
 @code {
-    private SensorFormModel sensorForm = new();
-    private TelemetryFormModel telemetryForm = new();
+    // Held in AppState so a half-filled form and the chosen devices survive navigating to another module.
+    private SensorFormModel sensorForm
+    {
+        get => State.SensorForm;
+        set => State.SensorForm = value;
+    }
+
+    private TelemetryFormModel telemetryForm => State.TelemetryForm;
 
     private List<SensorProfileResponse> sensors = new();
     private List<SensorReadingResponse> history = new();
@@ -303,7 +311,12 @@
     private const string ApiBaseUrl = "http://localhost:5256";
     private const long MaxFileSizeBytes = 5 * 1024 * 1024;
 
-    private string fileDeviceId = "";
+    private string fileDeviceId
+    {
+        get => State.FileDeviceId;
+        set => State.FileDeviceId = value;
+    }
+
     private IBrowserFile? selectedFile;
     private List<SensorFileResponse> attachedFiles = new();
     private bool isUploadingFile = false;

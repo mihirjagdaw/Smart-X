@@ -1,9 +1,14 @@
+using Smart_X.Shared.DTOs;
+
 namespace Smart_X.Api.Processing
 {
     // What a device looked like before a command touched it, so the command can be reverted.
     public record DeviceChange(string Mac, float? PreviousOverride, float? PreviousValue);
 
-    public record CommandRecord(int Id, string Description, DateTimeOffset At, List<DeviceChange> Changes);
+    public record CommandRecord(int Id, string Description, DateTimeOffset At, List<DeviceChange> Changes)
+    {
+        public CommandResponse ToResponse() => new(Id, Description, At, Changes.Select(c => c.Mac).ToList());
+    }
 
     /// <summary>
     /// Manual override commands in the order they were issued. A Stack is last-in-first-out, which is exactly

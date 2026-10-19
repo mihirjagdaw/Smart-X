@@ -28,27 +28,19 @@ namespace Smart_X.Api.Controllers
         // alert state. Devices with alerts come first. A text search is remembered so the insight engine can
         // learn what the operator looks at after what.
         [HttpGet("search")]
-        public IActionResult Search(string? q, SensorCategory? category, AlertFilter? alert)
+        public IActionResult Search(string? q, SensorCategory? category, AlertFilter? alert, bool record = true)
         {
             var terms = (q ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(t => t.ToLowerInvariant())
                 .ToArray();
 
-            var alertsByMac = _alerts.Snapshot().Active
-                .GroupBy(a => a.Mac, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.Select(a => a.Type).ToList(), StringComparer.OrdinalIgnoreCase);
-
-            var results = _registry.Snapshot()
-                .Where(d => d.IsActive && (category is null || d.Category == category))
-                .Select(d => new DeviceSummary(
-                    d.Mac, d.Category, d.Location, d.Description, d.LastValue, d.LastSeen, d.OverrideValue is not null,
-                    alertsByMac.GetValueOrDefault(d.Mac) ?? new List<string>()))
-                .Where(s => MatchesAlert(s.Alerts, alert) && MatchesTerms(s, terms))
-                .OrderByDescending(s => s.Alerts.Count)
-                .ThenBy(s => s.Description)
+            var results = DeviceSummaries.Build(_registry.Snapshot(), _alerts.Snapshot().Active)
+                .Where(s => (category is null || s.Category == category) && MatchesAlert(s.Alerts, alert) && MatchesTerms(s, terms))
                 .ToList();
 
-            if (terms.Length > 0)
+            // record=false lets a dashboard refresh the same search in the background without it counting as
+            // something the operator did.
+            if (record && terms.Length > 0)
             {
                 _actions.Record(ActionKey.Search(results.Count == 1 ? results[0].Mac : string.Join(' ', terms)));
             }

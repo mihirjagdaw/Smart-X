@@ -1,4 +1,6 @@
 ﻿@inherits LayoutComponentBase
+@inject Smart_X.Client.Services.LiveDataService LiveData
+
 <div class="page">
     <div class="sidebar">
         <NavMenu />
@@ -10,3 +12,8 @@
         </article>
     </main>
 </div>
+
+@code {
+    // Idempotent: the poller starts once and keeps running while the operator moves between modules.
+    protected override void OnInitialized() => LiveData.Start();
+}

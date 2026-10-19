@@ -14,17 +14,17 @@
         </div>
     </div>
 
-    <div class="card bg-light text-muted">
+    <div class="card border-primary" style="cursor: pointer;" @onclick='() => Navigation.NavigateTo("/command-stream")'>
         <div class="card-body">
             <h5 class="card-title">Real-Time Command Stream and History</h5>
-            <p class="card-text mb-0">To be implemented in Part 2.</p>
+            <p class="card-text text-muted mb-0">Watch readings arrive, find devices fast, send override commands with undo, and see suggested actions before you go looking for them.</p>
         </div>
     </div>
 
-    <div class="card bg-light text-muted">
+    <div class="card bg-light" style="cursor: pointer;" @onclick='() => Navigation.NavigateTo("/topology")'>
         <div class="card-body">
             <h5 class="card-title">Network Topology and Mesh Routing</h5>
-            <p class="card-text mb-0">To be implemented in the final PoE.</p>
+            <p class="card-text text-muted mb-0">To be implemented in the final PoE.</p>
         </div>
     </div>
 

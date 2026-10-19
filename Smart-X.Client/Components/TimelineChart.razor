@@ -1,0 +1,72 @@
+@using System.Globalization
+@using Smart_X.Shared
+@using Smart_X.Shared.DTOs
+
+@if (Points.Count < 2)
+{
+    <p class="text-muted small mb-0">Not enough readings in this window yet.</p>
+}
+else
+{
+    <svg viewBox="0 0 @Width @Height" class="w-100" role="img" aria-label="Timeline of @Label from @FirstTime to @LastTime, latest value @LatestText">
+        @LimitLines
+
+        <line x1="@Num(Left)" x2="@Num(Left)" y1="@Num(Top)" y2="@Num(Height - Bottom)" stroke="#adb5bd" />
+        <line x1="@Num(Left)" x2="@Num(Width - Right)" y1="@Num(Height - Bottom)" y2="@Num(Height - Bottom)" stroke="#adb5bd" />
+
+        <text x="@Num(Left - 4)" y="@Num(Top + 4)" text-anchor="end" font-size="10" fill="#6c757d">@High.ToString("0.#")</text>
+        <text x="@Num(Left - 4)" y="@Num(Height - Bottom)" text-anchor="end" font-size="10" fill="#6c757d">@Low.ToString("0.#")</text>
+        <text x="@Num(Left)" y="@Num(Height - 6)" font-size="10" fill="#6c757d">@FirstTime</text>
+        <text x="@Num(Width - Right)" y="@Num(Height - 6)" text-anchor="end" font-size="10" fill="#6c757d">@LastTime</text>
+
+        <polyline fill="none" stroke="#0d6efd" stroke-width="2" stroke-linejoin="round" points="@PolylinePoints" />
+        <circle cx="@Num(X(Points[^1]))" cy="@Num(Y(Points[^1].Value))" r="3.5" fill="#0d6efd" />
+    </svg>
+}
+
+@code {
+    private const double Width = 640, Height = 180, Left = 46, Right = 12, Top = 12, Bottom = 24;
+
+    [Parameter, EditorRequired] public List<SensorReadingResponse> Points { get; set; } = new();
+
+    [Parameter] public SensorCategory Category { get; set; }
+
+    [Parameter] public string Label { get; set; } = "readings";
+
+    private double Low => Points.Min(p => p.Value) - Padding;
+    private double High => Points.Max(p => p.Value) + Padding;
+    private double Padding => Math.Max((Points.Max(p => p.Value) - Points.Min(p => p.Value)) * 0.1, 0.5);
+
+    private string FirstTime => Points[0].Timestamp.ToLocalTime().ToString("HH:mm:ss");
+    private string LastTime => Points[^1].Timestamp.ToLocalTime().ToString("HH:mm:ss");
+    private string LatestText => Points[^1].Value.ToString("0.##");
+
+    // The safe-range edges, drawn only when they fall inside what is on screen.
+    private IEnumerable<double> Limits => Category switch
+    {
+        SensorCategory.Environmental => new[] { (double)AlertRules.EnvironmentalMin, AlertRules.EnvironmentalMax },
+        SensorCategory.PowerConsumption => new[] { (double)AlertRules.PowerMax },
+        _ => Array.Empty<double>()
+    };
+
+    // Built as a string because Razor reads a text element inside a code block as its own special tag.
+    // It holds only numbers, so there is nothing to encode.
+    private MarkupString LimitLines => new(string.Concat(
+        Limits.Where(l => l >= Low && l <= High).Select(l =>
+            $"<line x1=\"{Num(Left)}\" x2=\"{Num(Width - Right)}\" y1=\"{Num(Y(l))}\" y2=\"{Num(Y(l))}\" stroke=\"#dc3545\" stroke-dasharray=\"4 3\" />" +
+            $"<text x=\"{Num(Width - Right - 2)}\" y=\"{Num(Y(l) - 3)}\" text-anchor=\"end\" font-size=\"9\" fill=\"#dc3545\">limit {Num(l)}</text>")));
+
+    private string PolylinePoints => string.Join(" ", Points.Select(p => $"{Num(X(p))},{Num(Y(p.Value))}"));
+
+    private double X(SensorReadingResponse point)
+    {
+        var start = Points[0].Timestamp.UtcTicks;
+        var span = Points[^1].Timestamp.UtcTicks - start;
+        return span <= 0 ? Left : Left + (point.Timestamp.UtcTicks - start) / (double)span * (Width - Left - Right);
+    }
+
+    private double Y(double value) => Top + (High - value) / (High - Low) * (Height - Top - Bottom);
+
+    // A comma-decimal browser locale would otherwise produce invalid SVG coordinates.
+    private static string Num(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+}
