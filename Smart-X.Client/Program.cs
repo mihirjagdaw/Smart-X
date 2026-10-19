@@ -7,7 +7,7 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
-// Singleton, not scoped: the live-data service is a singleton and shares this client.
+// Registered as a singleton so the app-wide LiveDataService visibly shares one client (in WebAssembly a scoped service behaves the same).
 builder.Services.AddSingleton(sp => new HttpClient { BaseAddress = new Uri("http://localhost:5256") });
 builder.Services.AddSingleton<AppState>();
 builder.Services.AddSingleton<LiveDataService>();
