@@ -8,6 +8,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__SmartXDb=Data Source=/app/data/smartx.db
+      # The simulator posts readings to the API's own port inside the container (8080), not the published 5256.
+      - Simulator__ApiBaseUrl=http://localhost:8080
     volumes:
       - ./docker-data/db:/app/data
       - ./docker-data/uploads:/app/uploads
