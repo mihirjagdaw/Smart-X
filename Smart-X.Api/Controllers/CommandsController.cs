@@ -12,9 +12,9 @@ namespace Smart_X.Api.Controllers
         private readonly DeviceRegistry _registry;
         private readonly TelemetryPipeline _pipeline;
         private readonly CommandHistory _history;
-        private readonly ActionHistory _actions;
+        private readonly IActionRecorder _actions;
 
-        public CommandsController(DeviceRegistry registry, TelemetryPipeline pipeline, CommandHistory history, ActionHistory actions)
+        public CommandsController(DeviceRegistry registry, TelemetryPipeline pipeline, CommandHistory history, IActionRecorder actions)
         {
             _registry = registry;
             _pipeline = pipeline;

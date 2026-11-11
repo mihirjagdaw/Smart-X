@@ -7,17 +7,18 @@ namespace Smart_X.Api.Controllers
     [Route("api/[controller]")]
     public class InsightsController : ControllerBase
     {
-        private readonly InsightEngine _engine;
+        private readonly PredictionService _predictions;
 
-        public InsightsController(InsightEngine engine)
+        public InsightsController(PredictionService predictions)
         {
-            _engine = engine;
+            _predictions = predictions;
         }
 
+        // The predictions are generated in the background; this only returns the latest ones.
         [HttpGet]
         public IActionResult GetInsights()
         {
-            return Ok(_engine.Build());
+            return Ok(_predictions.Latest);
         }
     }
 }

@@ -13,15 +13,15 @@ namespace Smart_X.Api.Controllers
         private readonly TelemetryPipeline _pipeline;
         private readonly AlertTracker _alerts;
         private readonly CommandHistory _commands;
-        private readonly InsightEngine _insights;
+        private readonly PredictionService _predictions;
         private readonly DeviceRegistry _registry;
 
-        public StreamController(TelemetryPipeline pipeline, AlertTracker alerts, CommandHistory commands, InsightEngine insights, DeviceRegistry registry)
+        public StreamController(TelemetryPipeline pipeline, AlertTracker alerts, CommandHistory commands, PredictionService predictions, DeviceRegistry registry)
         {
             _pipeline = pipeline;
             _alerts = alerts;
             _commands = commands;
-            _insights = insights;
+            _predictions = predictions;
             _registry = registry;
         }
 
@@ -42,7 +42,7 @@ namespace Smart_X.Api.Controllers
                 _pipeline.GetRecent().Take(FeedLength).ToList(),
                 alerts,
                 _commands.Snapshot().Select(c => c.ToResponse()).ToList(),
-                _insights.Build(),
+                _predictions.Latest,
                 DeviceSummaries.Build(_registry.Snapshot(), alerts.Active)));
         }
     }

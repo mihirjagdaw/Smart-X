@@ -16,11 +16,11 @@ namespace Smart_X.Api.Processing
 
         private readonly HashSet<AlertKey> _active = new();
         private readonly Queue<AlertLogEntry> _log = new();
-        private readonly ActionHistory _actions;
+        private readonly IActionRecorder _actions;
         private readonly object _lock = new();
         private long _suppressed;
 
-        public AlertTracker(ActionHistory actions)
+        public AlertTracker(IActionRecorder actions)
         {
             _actions = actions;
         }

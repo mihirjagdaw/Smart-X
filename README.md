@@ -90,7 +90,9 @@ device / simulator ── HTTP ──> POST /api/Telemetry  (or /batch)
                          TelemetryProcessorService
                            ├─ history store: ring buffer + SortedDictionary timeline, and SQLite
                            ├─ AlertTracker (HashSet): raise once, clear on recovery
-                           └─ ActionHistory -> InsightEngine: suggestions and warnings
+                           └─ alerts, searches and commands -> ActionFeed (Channel)
+                                  -> PredictionService (background): ActionHistory (Queue) -> InsightEngine
+                                  -> latest suggestions and warnings, read by the API
 ```
 
 The menu has three modules: **Sensor Data Ingestion and Telemetry** (Part 1, with Manage Sensors beneath it), **Real-Time Command Stream and History** (Part 2), and **Network Topology and Mesh Routing** (a placeholder for the final PoE).
@@ -244,7 +246,9 @@ A few language/CLR features the brief calls for, and where they live:
 
 - **Hash set** — [`AlertTracker`](Smart-X.Api/Processing/AlertTracker.cs) stores active alerts in a `HashSet<AlertKey>` of (device, alert type). `Add` returns `false` for something already present, which is what stops a persistent problem, such as a node that stays offline, from raising an alert on every check; those repeats are counted and shown as "duplicates suppressed". [`DisconnectMonitorService`](Smart-X.Api/Processing/DisconnectMonitorService.cs) (a `PeriodicTimer` loop) raises Disconnected alerts, and [`SimulatorControl`](Smart-X.Api/Processing/SimulatorControl.cs) uses a `HashSet` of devices to pretend are unplugged.
 
-- **Predictive suggestions** — [`ActionHistory`](Smart-X.Api/Processing/ActionHistory.cs) records alerts, searches and commands, and counts how often each action follows another within two minutes (a first-order transition model). [`InsightEngine`](Smart-X.Api/Processing/InsightEngine.cs) looks at the alerts active right now and the operator's last few actions, and suggests the follow-ups that happened in at least two earlier occurrences and at least half of them, ranked by confidence using a `PriorityQueue`. It never re-suggests something already done or a command that would leave a device where it already is.
+- **Predictive suggestions** — [`ActionHistory`](Smart-X.Api/Processing/ActionHistory.cs) keeps the operator's recent alerts, searches and commands in a bounded `Queue<T>` (newest at the back, oldest dropped from the front once it holds 200) and counts how often each action follows another within two minutes (a first-order transition model). [`InsightEngine`](Smart-X.Api/Processing/InsightEngine.cs) looks at the alerts active right now and the operator's last few actions, and suggests the follow-ups that happened in at least two earlier occurrences and at least half of them, ranked by confidence using a `PriorityQueue`. It never re-suggests something already done or a command that would leave a device where it already is.
+
+- **Asynchronous prediction generation** — none of this runs inside a request. A search, command or alert only drops an event, stamped with the time it happened, into a `Channel<T>` ([`ActionFeed`](Smart-X.Api/Processing/ActionFeed.cs)) and returns immediately. [`PredictionService`](Smart-X.Api/Processing/PredictionService.cs), a `BackgroundService`, awaits the channel (or a one-second timer, to keep trend warnings fresh), updates the learning model, recomputes the suggestions on a worker thread with `await Task.Run(...)`, and publishes the result. `GET /api/Insights` and the dashboard snapshot simply read the latest published result, so their cost does not grow with the number of devices or the amount of history.
 
 - **Automated insights** — the same engine reads each device's sorted timeline to warn about trouble early: a least-squares line over the latest readings forecasts when a clean trend will leave the safe range (within ten minutes), and a reading that moves more than four times its normal step is flagged as an unusual jump.
 
