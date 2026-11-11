@@ -35,18 +35,21 @@ namespace Smart_X.Api.Processing
     /// it, and the pair is counted in a Dictionary of Dictionaries: transitions[trigger][follower] is how many
     /// times the follower came after the trigger. Lookups for a trigger that is active right now are O(1).
     /// </summary>
-    public class ActionHistory
+    public class ActionHistory : IActionRecorder
     {
         public const int MinSupport = 2;
         public const double MinConfidence = 0.5;
 
         private const int MaxPriors = 5;
+        private const int HistoryCapacity = 200;
         private static readonly TimeSpan Window = TimeSpan.FromSeconds(120);
 
         private sealed record RecentEvent(string Key, DateTimeOffset At, HashSet<string> Followers);
 
         private readonly Func<DateTimeOffset> _clock;
-        private readonly List<RecentEvent> _recent = new();
+        // The operator's recent actions, oldest at the front. A Queue fits: events arrive in time order, new
+        // ones join the back, and once it is full the oldest leave from the front.
+        private readonly Queue<RecentEvent> _recent = new();
         private readonly Dictionary<string, Dictionary<string, int>> _transitions = new();
         private readonly Dictionary<string, int> _occurrences = new();
         private readonly Dictionary<string, DateTimeOffset> _lastAt = new();
@@ -60,17 +63,21 @@ namespace Smart_X.Api.Processing
 
         // shortcut: lives in memory and grows with the number of distinct actions, so it resets on restart;
         // persist the two dictionaries if the learning needs to outlive the process.
-        public void Record(string key)
+        public void Record(string key) => Record(key, _clock());
+
+        // The action happened at "at", which can be earlier than now: the prediction service learns from
+        // actions after the request that caused them has already returned.
+        public void Record(string key, DateTimeOffset at)
         {
             lock (_lock)
             {
-                var now = _clock();
-                _recent.RemoveAll(e => now - e.At > Window);
+                // Only actions inside the window can be linked to this one. The queue is at most HistoryCapacity long.
+                var inWindow = _recent.Where(e => at - e.At <= Window).ToArray();
 
                 // Repeating the same action back to back is one intent, not several.
-                if (_recent.Count > 0 && _recent[^1].Key == key) return;
+                if (inWindow.Length > 0 && inWindow[^1].Key == key) return;
 
-                foreach (var prior in Enumerable.Reverse(_recent).Take(MaxPriors))
+                foreach (var prior in Enumerable.Reverse(inWindow).Take(MaxPriors))
                 {
                     // An earlier event can be followed by a given action only once, so a pair's count can
                     // never exceed the number of times its trigger happened.
@@ -85,8 +92,20 @@ namespace Smart_X.Api.Processing
                 }
 
                 _occurrences[key] = _occurrences.GetValueOrDefault(key) + 1;
-                _lastAt[key] = now;
-                _recent.Add(new RecentEvent(key, now, new HashSet<string>()));
+                _lastAt[key] = at;
+                _recent.Enqueue(new RecentEvent(key, at, new HashSet<string>()));
+                while (_recent.Count > HistoryCapacity) _recent.Dequeue();
+            }
+        }
+
+        public int RecentCount
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _recent.Count;
+                }
             }
         }
 
