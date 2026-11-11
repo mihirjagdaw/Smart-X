@@ -14,9 +14,9 @@ namespace Smart_X.Api.Controllers
         private readonly DeviceRegistry _registry;
         private readonly SimulatorControl _simulatorControl;
         private readonly AlertTracker _alerts;
-        private readonly ActionHistory _actions;
+        private readonly IActionRecorder _actions;
 
-        public DevicesController(DeviceRegistry registry, SimulatorControl simulatorControl, AlertTracker alerts, ActionHistory actions)
+        public DevicesController(DeviceRegistry registry, SimulatorControl simulatorControl, AlertTracker alerts, IActionRecorder actions)
         {
             _registry = registry;
             _simulatorControl = simulatorControl;
