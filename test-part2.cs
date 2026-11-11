@@ -216,6 +216,95 @@ Check("a device holding steady raises nothing", For("STEADY").Length == 0, strin
 Check("a sudden spike is flagged as an unusual jump", For("SPIKE").Any(m => m.Contains("Unusual jump")), string.Join(" | ", For("SPIKE")));
 Check("an on/off device is never trend-checked", For("ACT").Length == 0);
 
+// --- ActionHistory is a bounded Queue: new actions join the back, the oldest leave the front ---
+var boundedTime = DateTimeOffset.UtcNow;
+var bounded = new ActionHistory(() => boundedTime);
+for (var i = 0; i < 1000; i++)
+{
+    bounded.Record($"search:item{i}");
+    boundedTime = boundedTime.AddSeconds(1);
+}
+Check("the history never holds more than 200 actions", bounded.RecentCount == 200, $"{bounded.RecentCount}");
+Check("when full it keeps the newest actions", bounded.RecentKeys(1).SequenceEqual(new[] { "search:item999" }));
+
+var windowTime = DateTimeOffset.UtcNow;
+var windowed = new ActionHistory(() => windowTime);
+var windowAlerts = new AlertTracker(windowed);
+var windowEngine = new InsightEngine(insightRegistry, windowAlerts, windowed, insightStore);
+for (var i = 0; i < 3; i++)
+{
+    windowAlerts.TryRaise("B1", AlertType.Critical, "too dry");
+    windowTime = windowTime.AddSeconds(130);
+    windowed.Record(ActionKey.Command("P1", true));
+    windowAlerts.Clear("B1", AlertType.Critical, "recovered");
+    windowTime = windowTime.AddSeconds(300);
+}
+windowAlerts.TryRaise("B1", AlertType.Critical, "too dry");
+Check("an action more than two minutes after the alert is not linked to it", windowEngine.Build().SuggestedActions.Count == 0);
+
+// --- Predictions are generated in the background, off the request path ---
+async Task<bool> Eventually(Func<bool> condition, int timeoutMs = 3000)
+{
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    while (clock.ElapsedMilliseconds < timeoutMs)
+    {
+        if (condition()) return true;
+        await Task.Delay(10);
+    }
+    return condition();
+}
+
+{
+    var feed = new ActionFeed();
+    var model = new ActionHistory();
+    var asyncAlerts = new AlertTracker(feed);
+    var asyncEngine = new InsightEngine(insightRegistry, asyncAlerts, model, insightStore);
+    var service = new PredictionService(feed, model, asyncEngine, Microsoft.Extensions.Logging.Abstractions.NullLogger<PredictionService>.Instance);
+    await service.StartAsync(CancellationToken.None);
+
+    Check("before any action there are no predictions", service.Latest.SuggestedActions.Count == 0);
+
+    // The operator turns the pump on every time Moisture B goes critical. None of this touches the model directly.
+    for (var round = 0; round < 3; round++)
+    {
+        feed.Record(ActionKey.Alert("B1", "Critical"));
+        feed.Record(ActionKey.Command("P1", true));
+    }
+    feed.Record(ActionKey.Alert("B1", "Critical"));
+
+    var arrived = await Eventually(() => service.Latest.SuggestedActions.Any(s => s.Text == "Turn ON Pump A"));
+    Check("actions recorded through the feed become a suggestion in the background", arrived,
+        string.Join(" | ", service.Latest.SuggestedActions.Select(s => s.Text)));
+    Check("the model learned from every recorded action", model.RecentCount == 7, $"{model.RecentCount}");
+
+    var burst = System.Diagnostics.Stopwatch.StartNew();
+    for (var i = 0; i < 5000; i++) feed.Record($"search:burst{i}");
+    burst.Stop();
+    Check("5,000 actions are accepted in well under a second, so requests never wait on learning", burst.ElapsedMilliseconds < 500, $"{burst.ElapsedMilliseconds} ms");
+    await Eventually(() => model.RecentCount == 200 && model.RecentKeys(1).Count > 0 && model.RecentKeys(1)[0].StartsWith("search:burst"));
+    Check("a burst cannot make the history grow without limit", model.RecentCount == 200, $"{model.RecentCount}");
+
+    await service.StopAsync(CancellationToken.None);
+}
+
+{
+    // An action keeps the time it happened, even when it is only processed later.
+    var eventTime = DateTimeOffset.UtcNow;
+    var feed = new ActionFeed(() => eventTime);
+    var model = new ActionHistory(() => eventTime);
+    var engineForLate = new InsightEngine(insightRegistry, new AlertTracker(feed), model, insightStore);
+    var service = new PredictionService(feed, model, engineForLate, Microsoft.Extensions.Logging.Abstractions.NullLogger<PredictionService>.Instance);
+
+    feed.Record(ActionKey.Search("P1"));
+    eventTime = eventTime.AddSeconds(500);
+    await service.StartAsync(CancellationToken.None);
+    await Eventually(() => model.RecentCount == 1);
+
+    Check("an action is stamped when it happens, not when it is processed",
+        model.RecentCount == 1 && model.RecentKeys(5).Count == 0, "it should be older than the two-minute window by now");
+    await service.StopAsync(CancellationToken.None);
+}
+
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures == 0 ? 0 : 1;
