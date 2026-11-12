@@ -8,6 +8,7 @@
 @inject HttpClient Http
 @inject LiveDataService LiveData
 @inject AppState State
+@inject NavigationManager Navigation
 
 <PageTitle>Real-Time Command Stream</PageTitle>
 
@@ -217,11 +218,14 @@ else
                     {
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <h5 class="card-title mb-0">@Selected.Description <small class="text-muted">@Selected.Mac</small></h5>
-                            <select class="form-select form-select-sm w-auto" aria-label="Timeline window" @onchange="OnWindowChanged">
-                                <option value="1" selected="@(State.TimelineMinutes == 1)">Last minute</option>
-                                <option value="5" selected="@(State.TimelineMinutes == 5)">Last 5 minutes</option>
-                                <option value="30" selected="@(State.TimelineMinutes == 30)">Last 30 minutes</option>
-                            </select>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" @onclick="() => ShowOnMap(Selected.Mac)">Show on mesh map</button>
+                                <select class="form-select form-select-sm w-auto" aria-label="Timeline window" @onchange="OnWindowChanged">
+                                    <option value="1" selected="@(State.TimelineMinutes == 1)">Last minute</option>
+                                    <option value="5" selected="@(State.TimelineMinutes == 5)">Last 5 minutes</option>
+                                    <option value="30" selected="@(State.TimelineMinutes == 30)">Last 30 minutes</option>
+                                </select>
+                            </div>
                         </div>
                         <TimelineChart Points="LiveData.Timeline" Category="Selected.Category" Label="@Selected.Description" />
                     }
@@ -411,6 +415,13 @@ else
     }
 
     private Task SelectAsync(string mac) => LiveData.SelectDeviceAsync(mac);
+
+    // The map page tracks whichever device is in AppState, so choosing it here is the whole link.
+    private void ShowOnMap(string mac)
+    {
+        State.TopologyMac = mac;
+        Navigation.NavigateTo("/topology");
+    }
 
     private async Task OnWindowChanged(ChangeEventArgs e)
     {

@@ -39,6 +39,10 @@
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="topology">
                 <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Network Topology and Mesh Routing
+                @if (DownCount > 0)
+                {
+                    <span class="badge bg-danger ms-2" title="Devices that have gone silent">@DownCount</span>
+                }
             </NavLink>
         </div>
     </nav>
@@ -50,6 +54,8 @@
     private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
 
     private int ActiveAlertCount => LiveData.Snapshot?.Alerts.Active.Count ?? 0;
+
+    private int DownCount => LiveData.Snapshot?.Alerts.Active.Count(a => a.Type == "Disconnected") ?? 0;
 
     protected override void OnInitialized() => LiveData.Changed += OnLiveDataChanged;
 
