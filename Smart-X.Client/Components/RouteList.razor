@@ -1,0 +1,15 @@
+@using Smart_X.Shared.DTOs
+
+<ol class="small ps-3 mb-0">
+    <li>@Start</li>
+    @foreach (var hop in Path.Hops)
+    {
+        <li>@hop.Description <span class="text-muted">(link cost @hop.LinkCost.ToString("N0"))</span></li>
+    }
+</ol>
+
+@code {
+    [Parameter, EditorRequired] public RoutePath Path { get; set; } = default!;
+
+    [Parameter, EditorRequired] public string Start { get; set; } = "";
+}
