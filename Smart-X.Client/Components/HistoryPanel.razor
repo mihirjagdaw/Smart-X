@@ -1,0 +1,272 @@
+@using System.Net.Http.Json
+@using Smart_X.Client.Services
+@using Smart_X.Shared
+@using Smart_X.Shared.DTOs
+@inject HttpClient Http
+@inject AppState State
+
+<div class="card">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="card-title mb-0">Historical Telemetry Log</h5>
+            @if (Page is not null)
+            {
+                <span class="small text-muted">@Description (@Mac)</span>
+            }
+        </div>
+
+        @if (string.IsNullOrEmpty(Mac))
+        {
+            <p class="text-muted small mb-0">Choose a device on the map, or type its MAC address above, to browse everything it has reported.</p>
+        }
+        else
+        {
+            <div class="row g-2 align-items-end mb-3">
+                <div class="col-md-3">
+                    <label class="form-label small mb-0" for="historyRange">Time window</label>
+                    <select id="historyRange" class="form-select form-select-sm" @onchange="OnRangeChanged">
+                        @foreach (var (value, text) in Ranges)
+                        {
+                            <option value="@value" selected="@(State.HistoryRange == value)">@text</option>
+                        }
+                    </select>
+                </div>
+
+                @if (State.HistoryRange == "custom")
+                {
+                    <div class="col-md-3">
+                        <label class="form-label small mb-0" for="historyFrom">From</label>
+                        <input id="historyFrom" type="datetime-local" class="form-control form-control-sm" value="@(State.HistoryFrom?.ToString("yyyy-MM-ddTHH:mm"))" @onchange="OnFromChanged" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-0" for="historyTo">To</label>
+                        <input id="historyTo" type="datetime-local" class="form-control form-control-sm" value="@(State.HistoryTo?.ToString("yyyy-MM-ddTHH:mm"))" @onchange="OnToChanged" />
+                    </div>
+                }
+
+                <div class="col-auto">
+                    <label class="form-label small mb-0" for="historySize">Rows</label>
+                    <select id="historySize" class="form-select form-select-sm" @onchange="OnSizeChanged">
+                        @foreach (var size in new[] { 10, 25, 50, 100 })
+                        {
+                            <option value="@size" selected="@(State.HistoryPageSize == size)">@size</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <div class="form-check">
+                        <input id="historyNewest" class="form-check-input" type="checkbox" checked="@State.HistoryNewestFirst" @onchange="OnOrderChanged" />
+                        <label class="form-check-label small" for="historyNewest">Newest first</label>
+                    </div>
+                </div>
+                <div class="col-auto">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@loading" @onclick="LoadAsync">Refresh</button>
+                </div>
+            </div>
+
+            @if (error is not null)
+            {
+                <div class="alert alert-warning py-2" role="alert">@error</div>
+            }
+
+            @if (Page is not null)
+            {
+                <p class="small text-muted">
+                    <strong>@Page.Total.ToString("N0")</strong> readings in this window.
+                    Looked up in a tree of @Page.Stats.TreeSize.ToString("N0") readings (height @Page.Stats.TreeHeight) in @FormatMicroseconds(Page.Stats.ElapsedMicroseconds).
+                </p>
+
+                @if (Page.Items.Count == 0)
+                {
+                    <p class="text-muted small mb-0">No readings in this window.</p>
+                }
+                else
+                {
+                    <TimelineChart Points="ChartPoints" Category="Page.Category" Label="@($"history of {Description}")" />
+
+                    <div class="table-responsive mt-2" style="max-height: 320px; overflow-y: auto;">
+                        <table class="table table-sm table-striped mb-0">
+                            <thead class="sticky-top bg-white">
+                                <tr><th>Time</th><th class="text-end">Value</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var reading in Page.Items)
+                                {
+                                    <tr>
+                                        <td>@reading.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                        <td class="text-end">@FormatValue(reading.Value)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <span class="small text-muted">Showing @(Page.Skip + 1)-@(Page.Skip + Page.Items.Count) of @Page.Total.ToString("N0")</span>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-secondary" disabled="@(State.HistoryPage == 0 || loading)" @onclick="() => GoToAsync(0)">First</button>
+                            <button type="button" class="btn btn-outline-secondary" disabled="@(State.HistoryPage == 0 || loading)" @onclick="() => GoToAsync(State.HistoryPage - 1)">Previous</button>
+                            <button type="button" class="btn btn-outline-secondary" disabled="@(!HasNext || loading)" @onclick="() => GoToAsync(State.HistoryPage + 1)">Next</button>
+                            <button type="button" class="btn btn-outline-secondary" disabled="@(!HasNext || loading)" @onclick="() => GoToAsync(LastPage)">Last</button>
+                        </div>
+                    </div>
+                }
+            }
+            else if (loading)
+            {
+                <p class="text-muted small mb-0">Loading...</p>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private static readonly (string Value, string Text)[] Ranges =
+    {
+        ("15m", "Last 15 minutes"), ("1h", "Last hour"), ("24h", "Last 24 hours"), ("7d", "Last 7 days"), ("all", "Everything stored"), ("custom", "Custom range")
+    };
+
+    private string? loadedMac;
+    private bool loading;
+    private string? error;
+    private int requestNumber;
+
+    [Parameter] public string? Mac { get; set; }
+
+    [Parameter] public string Description { get; set; } = "";
+
+    private HistoryPageResponse? Page { get; set; }
+
+    private bool HasNext => Page is not null && Page.Skip + Page.Items.Count < Page.Total;
+
+    private int LastPage => Page is null || Page.Total == 0 ? 0 : (Page.Total - 1) / State.HistoryPageSize;
+
+    // The chart wants oldest first, whichever way the table is sorted.
+    private List<SensorReadingResponse> ChartPoints => (Page!.NewestFirst ? Enumerable.Reverse(Page.Items) : Page.Items)
+        .Select(r => new SensorReadingResponse(Page.Mac, Page.Category, r.Value, r.Timestamp)).ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Load again only when the device changed, not every time the map polls and re-renders this panel.
+        if (Mac == loadedMac) return;
+
+        loadedMac = Mac;
+        State.HistoryPage = 0;
+        Page = null;
+        error = null;
+        if (!string.IsNullOrEmpty(Mac)) await LoadAsync();
+    }
+
+    private async Task GoToAsync(int page)
+    {
+        State.HistoryPage = Math.Clamp(page, 0, LastPage);
+        await LoadAsync();
+    }
+
+    private async Task ChangedAsync()
+    {
+        State.HistoryPage = 0;
+        await LoadAsync();
+    }
+
+    private Task OnRangeChanged(ChangeEventArgs e)
+    {
+        State.HistoryRange = e.Value?.ToString() ?? "1h";
+        if (State.HistoryRange == "custom")
+        {
+            State.HistoryTo ??= DateTime.Now;
+            State.HistoryFrom ??= DateTime.Now.AddHours(-1);
+        }
+
+        return ChangedAsync();
+    }
+
+    private Task OnFromChanged(ChangeEventArgs e)
+    {
+        State.HistoryFrom = DateTime.TryParse(e.Value?.ToString(), out var value) ? value : null;
+        return ChangedAsync();
+    }
+
+    private Task OnToChanged(ChangeEventArgs e)
+    {
+        State.HistoryTo = DateTime.TryParse(e.Value?.ToString(), out var value) ? value : null;
+        return ChangedAsync();
+    }
+
+    private Task OnSizeChanged(ChangeEventArgs e)
+    {
+        State.HistoryPageSize = int.TryParse(e.Value?.ToString(), out var size) ? size : 25;
+        return ChangedAsync();
+    }
+
+    private Task OnOrderChanged(ChangeEventArgs e)
+    {
+        State.HistoryNewestFirst = e.Value is true;
+        return ChangedAsync();
+    }
+
+    private (DateTimeOffset? From, DateTimeOffset? To) Window()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return State.HistoryRange switch
+        {
+            "15m" => (now.AddMinutes(-15), null),
+            "1h" => (now.AddHours(-1), null),
+            "24h" => (now.AddHours(-24), null),
+            "7d" => (now.AddDays(-7), null),
+            "custom" => (Local(State.HistoryFrom), Local(State.HistoryTo)),
+            _ => (null, null)
+        };
+    }
+
+    // The date boxes hold the viewer's local time; the API wants an exact instant.
+    private static DateTimeOffset? Local(DateTime? value) =>
+        value is { } v ? new DateTimeOffset(DateTime.SpecifyKind(v, DateTimeKind.Local)) : null;
+
+    private async Task LoadAsync()
+    {
+        if (string.IsNullOrEmpty(Mac)) return;
+
+        var (from, to) = Window();
+        if (from > to)
+        {
+            error = "The start of the range is after its end.";
+            return;
+        }
+
+        var query = new List<string>
+        {
+            $"skip={State.HistoryPage * State.HistoryPageSize}",
+            $"take={State.HistoryPageSize}",
+            $"newestFirst={(State.HistoryNewestFirst ? "true" : "false")}"
+        };
+        if (from is { } f) query.Add($"from={Uri.EscapeDataString(f.UtcDateTime.ToString("o"))}");
+        if (to is { } t) query.Add($"to={Uri.EscapeDataString(t.UtcDateTime.ToString("o"))}");
+
+        // A slow answer for an earlier choice must not overwrite a newer one.
+        var mine = ++requestNumber;
+        loading = true;
+        error = null;
+        try
+        {
+            var result = await Http.GetFromJsonAsync<HistoryPageResponse>($"api/History/{Uri.EscapeDataString(Mac)}?{string.Join('&', query)}");
+            if (mine != requestNumber) return;
+            Page = result;
+        }
+        catch (Exception)
+        {
+            if (mine != requestNumber) return;
+            error = "Could not load the history. Try Refresh.";
+        }
+        finally
+        {
+            if (mine == requestNumber) loading = false;
+        }
+    }
+
+    private string FormatValue(float value) => Page?.Category == SensorCategory.Actuator
+        ? (value >= 1f ? "ON" : "OFF")
+        : value.ToString("0.##");
+
+    private static string FormatMicroseconds(double us) => us < 1000 ? $"{us:0.#} microseconds" : $"{us / 1000:0.##} ms";
+}
