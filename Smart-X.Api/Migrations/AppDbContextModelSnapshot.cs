@@ -102,6 +102,8 @@ namespace Smart_X.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DeviceId", "Timestamp");
+
                     b.ToTable("TelemetryRecords");
                 });
 #pragma warning restore 612, 618
