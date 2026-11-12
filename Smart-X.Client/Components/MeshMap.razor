@@ -1,0 +1,213 @@
+@using System.Globalization
+@using System.Net
+@using Smart_X.Shared.DTOs
+
+<svg viewBox="@ViewBox" class="w-100 border rounded bg-white" style="max-height: 70vh;" role="group" aria-label="Map of the vineyard mesh: @Data.Nodes.Count nodes and @Data.Links.Count links">
+
+    @* Links: the ordinary ones first, then the backbone on top, so the backbone stays readable. *@
+    @foreach (var link in Data.Links.Where(l => !l.OnMst))
+    {
+        <line x1="@Num(X(link.A))" y1="@Num(Y(link.A))" x2="@Num(X(link.B))" y2="@Num(Y(link.B))"
+              stroke="@LinkColour(link)" stroke-width="@(link.Backhaul ? 1.5 : 1)" stroke-dasharray="@LinkDash(link)"
+              opacity="@LinkOpacity(link)" vector-effect="non-scaling-stroke" />
+    }
+    @foreach (var link in Data.Links.Where(l => l.OnMst))
+    {
+        <line x1="@Num(X(link.A))" y1="@Num(Y(link.A))" x2="@Num(X(link.B))" y2="@Num(Y(link.B))"
+              stroke="@LinkColour(link)" stroke-width="2.5" stroke-dasharray="@LinkDash(link)"
+              opacity="@LinkOpacity(link)" vector-effect="non-scaling-stroke" />
+    }
+
+    @if (CheapestPoints is not null)
+    {
+        <polyline points="@CheapestPoints" fill="none" stroke="#0d6efd" stroke-width="3" stroke-dasharray="8 5"
+                  stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+    }
+    @if (RoutePoints is not null)
+    {
+        <polyline points="@RoutePoints" fill="none" stroke="#fd7e14" stroke-width="4.5" stroke-linejoin="round"
+                  stroke-linecap="round" vector-effect="non-scaling-stroke" />
+    }
+
+    @foreach (var node in Data.Nodes)
+    {
+        var id = node.Id;
+        <g tabindex="0" role="button" style="cursor: pointer; outline: none;" opacity="@(node.InSubnet ? 1 : 0.3)"
+           aria-label="@Describe(node)" aria-pressed="@(id == SelectedMac ? "true" : "false")"
+           @onclick="() => OnSelect.InvokeAsync(id)"
+           @onkeydown="e => KeyAsync(e, id)">
+            <title>@Describe(node)</title>
+            @if (id == SelectedMac)
+            {
+                <circle cx="@Num(node.X)" cy="@Num(node.Y)" r="@Num(Unit * 11)" fill="none" stroke="#fd7e14" stroke-width="3" vector-effect="non-scaling-stroke" />
+            }
+            @if (id == Data.Root && node.Status != "Gateway")
+            {
+                <circle cx="@Num(node.X)" cy="@Num(node.Y)" r="@Num(Unit * 14)" fill="none" stroke="#0d6efd" stroke-width="2" stroke-dasharray="3 2" vector-effect="non-scaling-stroke" />
+            }
+            @if (node.Status == "Gateway")
+            {
+                <rect x="@Num(node.X - Unit * 8)" y="@Num(node.Y - Unit * 8)" width="@Num(Unit * 16)" height="@Num(Unit * 16)"
+                      fill="#212529" stroke="@(id == Data.Root ? "#0d6efd" : "#fff")" stroke-width="2" vector-effect="non-scaling-stroke" />
+            }
+            else
+            {
+                <circle cx="@Num(node.X)" cy="@Num(node.Y)" r="@Num(Unit * 6)" fill="@Fill(node.Status)"
+                        stroke="@(node.Status == "Isolated" ? "#dc3545" : "#fff")" stroke-width="@(node.Status == "Isolated" ? 2.5 : 1.5)"
+                        stroke-dasharray="@(node.Status == "Isolated" ? "2 2" : null)" vector-effect="non-scaling-stroke" />
+            }
+            @if (node.Status == "Down")
+            {
+                @* A cross inside the dot, so a down device is not shown by colour alone. *@
+                <path d="M @Num(node.X - Unit * 3) @Num(node.Y - Unit * 3) L @Num(node.X + Unit * 3) @Num(node.Y + Unit * 3) M @Num(node.X + Unit * 3) @Num(node.Y - Unit * 3) L @Num(node.X - Unit * 3) @Num(node.Y + Unit * 3)"
+                      stroke="#fff" stroke-width="2" fill="none" vector-effect="non-scaling-stroke" />
+            }
+        </g>
+    }
+
+    @Labels
+</svg>
+
+<div class="d-flex flex-wrap gap-3 small text-muted mt-2" aria-label="Map key">
+    <span><span class="d-inline-block align-middle" style="width:12px;height:12px;background:#212529"></span> Gateway</span>
+    <span><span class="d-inline-block align-middle rounded-circle" style="width:12px;height:12px;background:#198754"></span> Online</span>
+    <span><span class="d-inline-block align-middle rounded-circle" style="width:12px;height:12px;background:#ffc107"></span> Critical reading</span>
+    <span><span class="d-inline-block align-middle rounded-circle" style="width:12px;height:12px;background:#dc3545"></span> Down (x)</span>
+    <span><span class="d-inline-block align-middle rounded-circle" style="width:12px;height:12px;background:#6c757d;border:2px dashed #dc3545"></span> Isolated</span>
+    <span><span class="d-inline-block align-middle" style="width:22px;height:0;border-top:3px solid #198754"></span> Power-efficient backbone</span>
+    <span><span class="d-inline-block align-middle" style="width:22px;height:0;border-top:1px solid #adb5bd"></span> Other link</span>
+    <span><span class="d-inline-block align-middle" style="width:22px;height:0;border-top:2px dashed #6f42c1"></span> Backhaul</span>
+    <span><span class="d-inline-block align-middle" style="width:22px;height:0;border-top:4px solid #fd7e14"></span> Tracked route</span>
+    <span><span class="d-inline-block align-middle" style="width:22px;height:0;border-top:3px dashed #0d6efd"></span> Cheapest route</span>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TopologyResponse Data { get; set; } = default!;
+
+    [Parameter] public string? SelectedMac { get; set; }
+
+    [Parameter] public RoutePath? Route { get; set; }
+
+    [Parameter] public RoutePath? Cheapest { get; set; }
+
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+
+    private Dictionary<string, TopologyNode> _byId = new(StringComparer.OrdinalIgnoreCase);
+    private double _minX, _minY, _width = 100, _height = 100;
+
+    // One screen pixel is about one unit when the map is a few hundred metres wide; larger maps scale the dots up.
+    private double Unit => Math.Max(1, Math.Max(_width, _height) / 700);
+
+    private string ViewBox => string.Create(CultureInfo.InvariantCulture, $"{_minX:0.##} {_minY:0.##} {_width:0.##} {_height:0.##}");
+
+    protected override void OnParametersSet()
+    {
+        _byId = Data.Nodes.ToDictionary(n => n.Id, StringComparer.OrdinalIgnoreCase);
+
+        var minX = Data.Nodes.Min(n => n.X);
+        var maxX = Data.Nodes.Max(n => n.X);
+        var minY = Data.Nodes.Min(n => n.Y);
+        var maxY = Data.Nodes.Max(n => n.Y);
+        var pad = Math.Max(40, Math.Max(maxX - minX, maxY - minY) * 0.05);
+
+        _minX = minX - pad;
+        _minY = minY - pad - 14;
+        _width = maxX - minX + 2 * pad;
+        _height = maxY - minY + 2 * pad + 14;
+    }
+
+    private double X(string id) => _byId.TryGetValue(id, out var node) ? node.X : 0;
+
+    private double Y(string id) => _byId.TryGetValue(id, out var node) ? node.Y : 0;
+
+    private string? RoutePoints => PointsFor(Route);
+
+    // Drawn only when it is a different way from the tracked one.
+    private string? CheapestPoints => Cheapest is not null && Route is not null
+        && !Cheapest.Hops.Select(h => h.Id).SequenceEqual(Route.Hops.Select(h => h.Id), StringComparer.OrdinalIgnoreCase)
+        ? PointsFor(Cheapest) : null;
+
+    private string? PointsFor(RoutePath? route)
+    {
+        if (route is null || string.IsNullOrEmpty(SelectedMac) || !_byId.ContainsKey(SelectedMac)) return null;
+
+        var ids = new[] { SelectedMac }.Concat(route.Hops.Select(h => h.Id)).Where(_byId.ContainsKey);
+        return string.Join(" ", ids.Select(id => $"{Num(X(id))},{Num(Y(id))}"));
+    }
+
+    private static string LinkColour(TopologyLink link) =>
+        link.Down ? "#dc3545" : link.OnMst ? "#198754" : link.Backhaul ? "#6f42c1" : "#ced4da";
+
+    private static string? LinkDash(TopologyLink link) => link.Down ? "3 3" : link.Backhaul ? "6 4" : null;
+
+    private string LinkOpacity(TopologyLink link) =>
+        Data.Subnet is null || (InSubnet(link.A) && InSubnet(link.B)) ? "1" : "0.25";
+
+    private bool InSubnet(string id) => !_byId.TryGetValue(id, out var node) || node.InSubnet;
+
+    private static string Fill(string status) => status switch
+    {
+        "Online" => "#198754",
+        "Critical" => "#ffc107",
+        "Down" => "#dc3545",
+        _ => "#6c757d"
+    };
+
+    private string Describe(TopologyNode node)
+    {
+        if (node.Status == "Gateway") return "Gateway";
+
+        var hops = node.HopsFromRoot is { } h ? $", {h} hop{(h == 1 ? "" : "s")} from {(Data.Root == "GATEWAY" ? "the gateway" : Name(Data.Root))}" : "";
+        return $"{node.Description}, {node.Location}, {node.Status}{hops}";
+    }
+
+    private string Name(string id) => _byId.TryGetValue(id, out var node) ? node.Description : id;
+
+    private async Task KeyAsync(KeyboardEventArgs e, string id)
+    {
+        if (e.Key is "Enter" or " ") await OnSelect.InvokeAsync(id);
+    }
+
+    // Text is built as a string because Razor reads a text element inside a code block as its own special tag.
+    // Everything that comes from the data is encoded.
+    private MarkupString Labels
+    {
+        get
+        {
+            var size = Num(Unit * 11);
+            var text = new System.Text.StringBuilder();
+
+            foreach (var zone in Data.Nodes.Where(n => n.Status != "Gateway").GroupBy(n => n.Zone))
+            {
+                var x = (zone.Min(n => n.X) + zone.Max(n => n.X)) / 2;
+                var y = zone.Min(n => n.Y) - Unit * 16;
+                text.Append($"<text x=\"{Num(x)}\" y=\"{Num(y)}\" text-anchor=\"middle\" font-size=\"{size}\" font-weight=\"600\" fill=\"#495057\">{WebUtility.HtmlEncode(zone.Key)}</text>");
+            }
+
+            var gateway = Data.Nodes.FirstOrDefault(n => n.Status == "Gateway");
+            if (gateway is not null)
+            {
+                text.Append($"<text x=\"{Num(gateway.X)}\" y=\"{Num(gateway.Y + Unit * 22)}\" text-anchor=\"middle\" font-size=\"{size}\" fill=\"#212529\">Gateway</text>");
+            }
+
+            // Name the tracked device, and number every device by its hops from the root when tracing from a device.
+            if (SelectedMac is not null && _byId.TryGetValue(SelectedMac, out var selected))
+            {
+                text.Append($"<text x=\"{Num(selected.X)}\" y=\"{Num(selected.Y + Unit * 24)}\" text-anchor=\"middle\" font-size=\"{size}\" font-weight=\"700\" fill=\"#c2570c\" stroke=\"#fff\" stroke-width=\"3\" paint-order=\"stroke\">{WebUtility.HtmlEncode(selected.Description)}</text>");
+            }
+
+            if (Data.Root != "GATEWAY" && Data.Nodes.Count <= 150)
+            {
+                foreach (var node in Data.Nodes.Where(n => n.HopsFromRoot is not null && n.Status != "Gateway"))
+                {
+                    text.Append($"<text x=\"{Num(node.X + Unit * 8)}\" y=\"{Num(node.Y + Unit * 14)}\" font-size=\"{Num(Unit * 9)}\" fill=\"#0a58ca\" pointer-events=\"none\">{node.HopsFromRoot}</text>");
+                }
+            }
+
+            return new MarkupString(text.ToString());
+        }
+    }
+
+    // A comma-decimal browser locale would otherwise produce invalid SVG coordinates.
+    private static string Num(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+}
