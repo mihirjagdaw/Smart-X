@@ -11,7 +11,8 @@ namespace Smart_X.Api.Processing
         bool IsActive,
         DateTimeOffset? LastSeen = null,
         float? LastValue = null,
-        float? OverrideValue = null);
+        float? OverrideValue = null,
+        int Id = 0);
 
     /// <summary>
     /// Live registered devices keyed by MAC address, so each incoming packet is an O(1) lookup
@@ -81,6 +82,6 @@ namespace Smart_X.Api.Processing
         }
 
         private static DeviceState ToState(SensorProfile sensor) =>
-            new(sensor.MacAddress, sensor.Category, sensor.Location, sensor.Description, sensor.IsActive);
+            new(sensor.MacAddress, sensor.Category, sensor.Location, sensor.Description, sensor.IsActive, Id: sensor.Id);
     }
 }
