@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Smart_X.Api.Data;
+using Smart_X.Api.History;
 using Smart_X.Api.Processing;
 using Smart_X.Shared;
 using Smart_X.Shared.DTOs;
@@ -16,14 +17,16 @@ namespace Smart_X.Api.Controllers
         private readonly TelemetryHistoryStore _telemetryHistoryStore;
         private readonly DeviceRegistry _registry;
         private readonly AlertTracker _alerts;
+        private readonly TelemetryArchive _archive;
 
-        public SensorsController(AppDbContext dbContext, IWebHostEnvironment environment, TelemetryHistoryStore telemetryHistoryStore, DeviceRegistry registry, AlertTracker alerts)
+        public SensorsController(AppDbContext dbContext, IWebHostEnvironment environment, TelemetryHistoryStore telemetryHistoryStore, DeviceRegistry registry, AlertTracker alerts, TelemetryArchive archive)
         {
             _dbContext = dbContext;
             _environment = environment;
             _telemetryHistoryStore = telemetryHistoryStore;
             _registry = registry;
             _alerts = alerts;
+            _archive = archive;
         }
 
         [HttpPost]
@@ -50,9 +53,11 @@ namespace Smart_X.Api.Controllers
             {
                 var seedReadings = MockTelemetryGenerator.GenerateBatches(deviceCount: 1, minReadingsPerBatch: 3, maxReadingsPerBatch: 8)[0];
                 _telemetryHistoryStore.AddBatch(sensorProfile.MacAddress, sensorProfile.Category, seedReadings);
+                var seededAt = DateTimeOffset.UtcNow;
                 foreach (var value in seedReadings)
                 {
-                    _dbContext.TelemetryRecords.Add(new TelemetryRecord(0, sensorProfile.MacAddress, sensorProfile.Category, value, DateTimeOffset.UtcNow));
+                    _dbContext.TelemetryRecords.Add(new TelemetryRecord(0, sensorProfile.MacAddress, sensorProfile.Category, value, seededAt));
+                    _archive.Add(sensorProfile.MacAddress, seededAt, value);
                 }
                 await _dbContext.SaveChangesAsync();
             }
@@ -151,13 +156,17 @@ namespace Smart_X.Api.Controllers
             }
             _dbContext.SensorFiles.RemoveRange(files);
 
-            var telemetryRecords = await _dbContext.TelemetryRecords.Where(t => t.DeviceId == sensor.MacAddress).ToListAsync();
-            _dbContext.TelemetryRecords.RemoveRange(telemetryRecords);
-
-            _telemetryHistoryStore.RemoveDevice(sensor.MacAddress);
+            // Deleted inside the database in one statement (the new index makes it quick), not by loading every
+            // reading, and in the same transaction as the sensor row so a failure cannot lose one without the other.
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            await _dbContext.TelemetryRecords.Where(t => t.DeviceId == sensor.MacAddress).ExecuteDeleteAsync();
 
             _dbContext.Sensors.Remove(sensor);
             await _dbContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            _telemetryHistoryStore.RemoveDevice(sensor.MacAddress);
+            _archive.Remove(sensor.MacAddress);
             _registry.Remove(sensor.MacAddress);
             _alerts.ClearDevice(sensor.MacAddress);
 

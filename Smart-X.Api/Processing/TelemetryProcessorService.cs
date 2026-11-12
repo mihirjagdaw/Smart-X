@@ -1,4 +1,5 @@
 using Smart_X.Api.Data;
+using Smart_X.Api.History;
 using Smart_X.Shared;
 
 namespace Smart_X.Api.Processing
@@ -13,6 +14,7 @@ namespace Smart_X.Api.Processing
         private readonly DeviceRegistry _registry;
         private readonly TelemetryHistoryStore _store;
         private readonly AlertTracker _alerts;
+        private readonly TelemetryArchive _archive;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<TelemetryProcessorService> _logger;
         private readonly TimeSpan _standardDelay;
@@ -22,6 +24,7 @@ namespace Smart_X.Api.Processing
             DeviceRegistry registry,
             TelemetryHistoryStore store,
             AlertTracker alerts,
+            TelemetryArchive archive,
             IServiceScopeFactory scopeFactory,
             IConfiguration configuration,
             ILogger<TelemetryProcessorService> logger)
@@ -30,6 +33,7 @@ namespace Smart_X.Api.Processing
             _registry = registry;
             _store = store;
             _alerts = alerts;
+            _archive = archive;
             _scopeFactory = scopeFactory;
             _logger = logger;
             _standardDelay = TimeSpan.FromMilliseconds(configuration.GetValue("Processing:StandardDelayMs", 100));
@@ -74,6 +78,7 @@ namespace Smart_X.Api.Processing
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.TelemetryRecords.Add(new TelemetryRecord(0, packet.Mac, packet.Category, packet.Value, packet.Timestamp));
             await db.SaveChangesAsync();
+            _archive.Add(packet.Mac, packet.Timestamp, packet.Value);
 
             // LastSeen is stamped when the packet arrives (see TelemetryController), not here, so a long
             // backlog cannot make a device that is still sending look silent.

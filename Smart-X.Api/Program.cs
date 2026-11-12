@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Smart_X.Api;
 using Smart_X.Api.Data;
+using Smart_X.Api.History;
+using Smart_X.Api.Network;
 using Smart_X.Api.Processing;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +16,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("SmartXDb")));
 
 builder.Services.AddSingleton<TelemetryHistoryStore>();
+builder.Services.AddSingleton<TelemetryArchive>();
 builder.Services.AddSingleton<DeviceRegistry>();
 builder.Services.AddSingleton<TelemetryPipeline>();
 builder.Services.AddSingleton<AlertTracker>();
@@ -27,6 +30,10 @@ builder.Services.AddSingleton<PredictionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PredictionService>());
 builder.Services.AddHostedService<TelemetryProcessorService>();
 builder.Services.AddHostedService<DisconnectMonitorService>();
+builder.Services.AddHostedService<HistoryRetentionService>();
+builder.Services.AddSingleton(builder.Configuration.GetSection("Mesh").Get<MeshOptions>() ?? new MeshOptions());
+builder.Services.AddSingleton<TopologyService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TopologyService>());
 builder.Services.AddHostedService<TelemetrySimulatorService>();
 
 builder.Services.AddCors(options =>
@@ -44,6 +51,13 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
     app.Services.GetRequiredService<DeviceRegistry>().Load(db.Sensors.AsNoTracking().ToList());
+
+    // Rebuild each device's history tree from the database before any request or background service runs.
+    var archive = app.Services.GetRequiredService<TelemetryArchive>();
+    var loadStarted = System.Diagnostics.Stopwatch.StartNew();
+    var loaded = await archive.LoadAsync(db, HistoryRetentionService.CutoffFrom(app.Configuration));
+    app.Logger.LogInformation("Telemetry archive loaded: {Readings} readings for {Devices} devices in {Elapsed} ms",
+        loaded, archive.DeviceCount, loadStarted.ElapsedMilliseconds);
 }
 
 Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "uploads"));
