@@ -1,15 +1,332 @@
 @page "/topology"
+@using Smart_X.Client.Components
+@using Smart_X.Client.Services
+@using Smart_X.Shared.DTOs
+@implements IDisposable
+@inject LiveDataService LiveData
+@inject AppState State
+@inject NavigationManager Navigation
 
 <PageTitle>Network Topology and Mesh Routing</PageTitle>
 
-<h1 class="mb-4">Network Topology and Mesh Routing</h1>
-
-<div class="card bg-light" style="max-width: 640px;">
-    <div class="card-body">
-        <h5 class="card-title">Coming in the final PoE</h5>
-        <p class="card-text text-muted mb-0">
-            This module will map how vineyard devices connect to each other and to the gateway, and how readings are routed between them.
-            Sensor Data Ingestion and the Real-Time Command Stream are available now from the menu.
-        </p>
-    </div>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="mb-0">Network Topology and Mesh Routing</h1>
+    <span class="small @(LiveData.TopologyError is null ? "text-success" : "text-danger")" role="status">@StatusText</span>
 </div>
+
+@if (LiveData.TopologyNotice is not null)
+{
+    <div class="alert alert-warning py-2 d-flex justify-content-between align-items-center" role="alert">
+        <span>@LiveData.TopologyNotice</span>
+        <button type="button" class="btn-close" aria-label="Dismiss message" @onclick="DismissNotice"></button>
+    </div>
+}
+
+@if (Topo is null)
+{
+    <p class="text-muted">Loading the mesh...</p>
+}
+else
+{
+    var s = Topo.Summary;
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="card-subtitle text-muted mb-1">Devices</h6>
+                    <div class="fs-4">@s.Online <span class="fs-6 text-muted">online of @s.Nodes</span></div>
+                    <div class="small">
+                        <span class="badge @(s.Down > 0 ? "bg-danger" : "bg-light text-dark border")">@s.Down down</span>
+                        <span class="badge @(s.Isolated > 0 ? "bg-secondary" : "bg-light text-dark border")">@s.Isolated isolated</span>
+                        <span class="text-muted ms-1">@s.Links links</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="card-subtitle text-muted mb-1">Power-efficient backbone (minimum spanning tree)</h6>
+                    <div class="fs-4">@s.MstTotalCost.ToString("N0") <span class="fs-6 text-muted">nJ/bit over @s.MstLinks links</span></div>
+                    <div class="small">
+                        Keeping every link would cost @s.AllLinksCost.ToString("N0"): the backbone saves <strong>@s.SavingPercent.ToString("0.#")%</strong>.
+                        <span class="badge @(s.MstVerified ? "bg-success" : "bg-danger")">@(s.MstVerified ? "Prim and Kruskal agree" : "Prim and Kruskal disagree")</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="card-subtitle text-muted mb-1">Every device reporting once</h6>
+                    <div class="fs-4">@s.CollectCostViaMst.ToString("N0") <span class="fs-6 text-muted">nJ/bit on the backbone</span></div>
+                    <div class="small">
+                        If each device used its own cheapest route it would cost @s.CollectCostViaCheapest.ToString("N0"),
+                        so the backbone's routes cost @(s.ExtraPercentViaMst.ToString("0.#"))% more. The backbone makes the network as a whole cheap, not every single route.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small mb-0" for="subnet">Subnet (facility or zone)</label>
+                    <select id="subnet" class="form-select form-select-sm" @onchange="OnSubnetChanged">
+                        <option value="" selected="@(State.TopologySubnet == "")">Whole estate</option>
+                        @foreach (var subnet in Topo.Subnets)
+                        {
+                            <option value="@subnet" selected="@(State.TopologySubnet == subnet)">@subnet</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-0" for="trackMac">Track a device by MAC address</label>
+                    <input id="trackMac" class="form-control form-control-sm" list="deviceList" placeholder="e.g. AA:BB:CC:00:00:01"
+                           value="@State.TopologyMac" @onchange="OnTrackChanged" />
+                    <datalist id="deviceList">
+                        @foreach (var node in Topo.Nodes.Where(n => n.Status != "Gateway"))
+                        {
+                            <option value="@node.Id" label="@node.Description"></option>
+                        }
+                    </datalist>
+                </div>
+                <div class="col-md-4 d-flex flex-wrap gap-2">
+                    @if (State.TopologyMac is not null && State.TopologyRoot != State.TopologyMac)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => TraceFromAsync(State.TopologyMac)">Show who is connected from this device</button>
+                    }
+                    @if (State.TopologyRoot is not null)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => TraceFromAsync(null)">Back to the gateway</button>
+                    }
+                </div>
+            </div>
+            @if (State.TopologyRoot is not null)
+            {
+                <p class="small text-muted mt-2 mb-0">Numbers on the map are hops from <strong>@NameOf(Topo.Root)</strong>, found with a breadth-first search that skips devices that are down.</p>
+            }
+        </div>
+    </div>
+
+    @if (s.Nodes == 0)
+    {
+        <div class="alert alert-info">No devices are registered yet. Register sensors under Sensor Data Ingestion and they will appear here.</div>
+    }
+
+    <div class="row g-3 mb-3">
+        <div class="col-lg-8">
+            <MeshMap Data="Topo" SelectedMac="@State.TopologyMac" Route="@LiveData.Route?.PowerEfficientRoute"
+                     Cheapest="@LiveData.Route?.CheapestRoute" OnSelect="SelectAsync" />
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">Route Tracker</h5>
+                    @if (Route is null)
+                    {
+                        <p class="text-muted small mb-0">Click a device on the map, or type its MAC address above, to follow its route to the gateway.</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>@Route.Description</strong>
+                                <div class="small text-muted">@Route.Id</div>
+                            </div>
+                            <span class="badge @StatusClass(Route.Status)">@Route.Status</span>
+                        </div>
+                        <p class="small mt-2">@Route.Message</p>
+
+                        @if (Route.PowerEfficientRoute is { } efficient)
+                        {
+                            <h6 class="mb-1">Power-efficient route <span class="text-muted fw-normal">(backbone, @efficient.TotalCost.ToString("N0") nJ/bit)</span></h6>
+                            <RouteList Path="efficient" Start="@Route.Description" />
+
+                            @if (Route.CheapestRoute is { } cheapest)
+                            {
+                                <h6 class="mb-1 mt-3">Cheapest route <span class="text-muted fw-normal">(Dijkstra, @cheapest.TotalCost.ToString("N0") nJ/bit)</span></h6>
+                                @if (Route.ExtraPercentViaMst is > 0)
+                                {
+                                    <p class="small mb-1">The backbone route costs <strong>@Route.ExtraPercentViaMst.Value.ToString("0.#")%</strong> more for this device, but keeps the whole network cheaper.</p>
+                                }
+                                else
+                                {
+                                    <p class="small mb-1">Same as the backbone route.</p>
+                                }
+                                <RouteList Path="cheapest" Start="@Route.Description" />
+                            }
+                        }
+
+                        @if (Route.Backup is { } backup)
+                        {
+                            <h6 class="mb-1 mt-3">If @NameOf(backup.FailedHop) fails</h6>
+                            @if (backup.Route is { } fallback)
+                            {
+                                <p class="small mb-1">Self-heals through another neighbour, @fallback.TotalCost.ToString("N0") nJ/bit:</p>
+                                <RouteList Path="fallback" Start="@Route.Description" />
+                            }
+                            else
+                            {
+                                <p class="small text-danger mb-0">No other way out: the device would be cut off.</p>
+                            }
+                        }
+
+                        @if (Route.Neighbours.Count > 0)
+                        {
+                            <h6 class="mb-1 mt-3">Neighbours in radio range</h6>
+                            <div class="list-group list-group-flush">
+                                @foreach (var neighbour in Route.Neighbours)
+                                {
+                                    <button type="button" class="list-group-item list-group-item-action px-0 py-1 small d-flex justify-content-between" @onclick="() => SelectAsync(neighbour.Id)">
+                                        <span>@neighbour.Description <span class="badge @StatusClass(neighbour.Status)">@neighbour.Status</span></span>
+                                        <span class="text-muted">@neighbour.DistanceMetres.ToString("0") m, @neighbour.LinkCost.ToString("N0")</span>
+                                    </button>
+                                }
+                            </div>
+                        }
+
+                        <div class="d-flex flex-wrap gap-2 mt-3">
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenInCommandStreamAsync(Route.Id)">Open in command stream</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SelectAsync(null)">Stop tracking</button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (Topo.SubnetDetail is { } detail)
+            {
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">@detail.Name</h5>
+                        <ul class="list-unstyled small mb-0">
+                            <li>@detail.Members devices in this subnet</li>
+                            <li>@detail.Connected reach the @(State.TopologyRoot is null ? "gateway" : "chosen device")</li>
+                            <li>@detail.Down down, @detail.CutOff cut off</li>
+                            <li>Healthy members form @detail.Islands separate @(detail.Islands == 1 ? "network" : "networks") on their own</li>
+                        </ul>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Self-healing Log</h5>
+            @if (Topo.HealLog.Count == 0)
+            {
+                <p class="text-muted small mb-0">Nothing has changed since the server started. Take a device offline from the command stream, or wait for one to go quiet, and the mesh re-routes around it here.</p>
+            }
+            else
+            {
+                <div style="max-height: 260px; overflow-y: auto;">
+                    @foreach (var change in Topo.HealLog.Take(40))
+                    {
+                        <div class="small py-1 border-bottom">
+                            <span class="text-muted">@change.At.ToLocalTime().ToString("HH:mm:ss")</span>
+                            <span class="badge @HealClass(change.Kind) mx-1">@change.Kind</span>
+                            @if (!string.IsNullOrEmpty(change.Mac))
+                            {
+                                <a href="#" class="text-decoration-none" @onclick="() => SelectAsync(change.Mac)" @onclick:preventDefault="true">@change.Message</a>
+                            }
+                            else
+                            {
+                                @change.Message
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <HistoryPanel Mac="@State.TopologyMac" Description="@(Route?.Description ?? "")" />
+}
+
+@code {
+    private TopologyResponse? Topo => LiveData.Topology;
+
+    private RouteResponse? Route => LiveData.Route;
+
+    private string StatusText => LiveData.TopologyError
+        ?? (Topo is null ? "Connecting..." : $"Live, mesh version {Topo.Version}");
+
+    protected override void OnInitialized()
+    {
+        LiveData.Changed += OnLiveDataChanged;
+        LiveData.StartTopology();
+    }
+
+    private void OnLiveDataChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private string NameOf(string id) => Topo?.Nodes.FirstOrDefault(n => string.Equals(n.Id, id, StringComparison.OrdinalIgnoreCase))?.Description ?? id;
+
+    private void DismissNotice() => LiveData.TopologyNotice = null;
+
+    private async Task SelectAsync(string? mac)
+    {
+        State.TopologyMac = string.IsNullOrWhiteSpace(mac) ? null : mac;
+        await LiveData.RefreshTopologyAsync();
+    }
+
+    // Sensor Data and Command Stream pages already follow AppState.SelectedMac, so choosing it is the whole link.
+    private async Task OpenInCommandStreamAsync(string mac)
+    {
+        await LiveData.SelectDeviceAsync(mac);
+        Navigation.NavigateTo("/command-stream");
+    }
+
+    private async Task TraceFromAsync(string? mac)
+    {
+        State.TopologyRoot = mac;
+        await LiveData.RefreshTopologyAsync();
+    }
+
+    private async Task OnSubnetChanged(ChangeEventArgs e)
+    {
+        State.TopologySubnet = e.Value?.ToString() ?? "";
+        await LiveData.RefreshTopologyAsync();
+    }
+
+    private async Task OnTrackChanged(ChangeEventArgs e)
+    {
+        var typed = e.Value?.ToString()?.Trim() ?? "";
+        var match = Topo?.Nodes.FirstOrDefault(n => n.Status != "Gateway" && string.Equals(n.Id, typed, StringComparison.OrdinalIgnoreCase));
+
+        if (typed.Length > 0 && match is null)
+        {
+            LiveData.TopologyNotice = $"No device in the mesh has the MAC address {typed}.";
+            return;
+        }
+
+        await SelectAsync(match?.Id);
+    }
+
+    private static string StatusClass(string status) => status switch
+    {
+        "Online" => "bg-success",
+        "Critical" => "bg-warning text-dark",
+        "Down" => "bg-danger",
+        "Isolated" => "bg-secondary",
+        _ => "bg-dark"
+    };
+
+    private static string HealClass(string kind) => kind switch
+    {
+        "Down" or "CutOff" => "bg-danger",
+        "Up" or "Reconnected" => "bg-success",
+        "Rerouted" => "bg-info text-dark",
+        _ => "bg-secondary"
+    };
+
+    public void Dispose()
+    {
+        LiveData.Changed -= OnLiveDataChanged;
+        LiveData.StopTopology();
+    }
+}
