@@ -20,5 +20,17 @@ namespace Smart_X.Client.Services
         public AlertFilter? Alert { get; set; }
         public string? SelectedMac { get; set; }
         public int TimelineMinutes { get; set; } = 5;
+
+        // Network Topology page: the subnet being looked at, the device connections are traced from (null = the
+        // gateway), the device whose route is being tracked, and the history log's window and page.
+        public string TopologySubnet { get; set; } = "";
+        public string? TopologyRoot { get; set; }
+        public string? TopologyMac { get; set; }
+        public string HistoryRange { get; set; } = "1h";
+        public DateTime? HistoryFrom { get; set; }
+        public DateTime? HistoryTo { get; set; }
+        public int HistoryPageSize { get; set; } = 25;
+        public bool HistoryNewestFirst { get; set; } = true;
+        public int HistoryPage { get; set; }
     }
 }
