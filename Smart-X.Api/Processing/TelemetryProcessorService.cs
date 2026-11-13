@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Smart_X.Api.Data;
 using Smart_X.Api.History;
 using Smart_X.Shared;
@@ -18,6 +19,11 @@ namespace Smart_X.Api.Processing
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<TelemetryProcessorService> _logger;
         private readonly TimeSpan _standardDelay;
+        private int _sinceCheckpoint;
+
+        // SQLite does not fold its write-ahead log back into the database by itself while connections stay pooled:
+        // it grew about 13 KB per reading without limit. A checkpoint every 1,000 readings keeps it near 12 MB.
+        private const int CheckpointEvery = 1000;
 
         public TelemetryProcessorService(
             TelemetryPipeline pipeline,
@@ -54,6 +60,8 @@ namespace Smart_X.Api.Processing
                     _logger.LogError(ex, "Failed to process packet for {Mac}", packet.Mac);
                 }
 
+                await CheckpointIfDue();
+
                 // shortcut: serial consumer with one DB write per packet; the delay only throttles the
                 // standard lane so a backlog is visible and critical packets overtake it. Set
                 // Processing:StandardDelayMs=0 and batch the writes if real throughput is ever needed.
@@ -61,6 +69,22 @@ namespace Smart_X.Api.Processing
                 {
                     await Task.Delay(_standardDelay, stoppingToken);
                 }
+            }
+        }
+
+        private async Task CheckpointIfDue()
+        {
+            if (++_sinceCheckpoint < CheckpointEvery) return;
+            _sinceCheckpoint = 0;
+
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(TRUNCATE)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not checkpoint the database log; it will be tried again after the next {Count} readings", CheckpointEvery);
             }
         }
 
