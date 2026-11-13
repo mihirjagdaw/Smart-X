@@ -10,7 +10,7 @@ A vineyard IoT telemetry system. Sensors (soil moisture, canopy temperature, pow
 
 **Part 2 demo video:** https://youtu.be/-F49rAjtaYs
 
-**Part 3 demo video:** *(add the YouTube link here)*
+**Part 3 demo video:** https://youtu.be/H5U-JAM21f8
 
 ## Stack
 
