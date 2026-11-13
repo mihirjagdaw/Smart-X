@@ -12,6 +12,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 
+// The topology and stream responses are large JSON that the client polls every two seconds; gzip/brotli cuts them roughly tenfold.
+builder.Services.AddResponseCompression(options => options.EnableForHttps = true);
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("SmartXDb")));
 
@@ -69,6 +72,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(options =>
         options.SwaggerEndpoint("/openapi/v1.json", "Smart-X API v1"));
 }
+
+app.UseResponseCompression();
 
 app.UseHttpsRedirection();
 
