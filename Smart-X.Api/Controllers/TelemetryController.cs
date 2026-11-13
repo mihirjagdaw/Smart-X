@@ -9,7 +9,7 @@ namespace Smart_X.Api.Controllers
     [Route("api/[controller]")]
     public class TelemetryController : ControllerBase
     {
-        private const int MaxBatchSize = 500;
+        public const int MaxBatchSize = 500;
 
         private readonly TelemetryHistoryStore _telemetryHistoryStore;
         private readonly DeviceRegistry _registry;

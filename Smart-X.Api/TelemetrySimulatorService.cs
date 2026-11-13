@@ -61,8 +61,12 @@ namespace Smart_X.Api
 
             if (requests.Count == 0) return;
 
-            var response = await _http.PostAsJsonAsync("api/Telemetry/batch", requests, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            // The batch endpoint refuses more than MaxBatchSize readings at once, so a big estate goes up in chunks.
+            foreach (var chunk in requests.Chunk(Controllers.TelemetryController.MaxBatchSize))
+            {
+                var response = await _http.PostAsJsonAsync("api/Telemetry/batch", chunk, cancellationToken);
+                response.EnsureSuccessStatusCode();
+            }
         }
 
         // Devices report in the value type their category uses: float, int or on/off.

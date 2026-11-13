@@ -19,6 +19,7 @@ namespace Smart_X.Client.Services
         private int _refreshing;
         private int _topologyBusy;
         private volatile bool _topologyDirty;
+        private string _topologyKey = "";
 
         public LiveDataService(HttpClient http, AppState state)
         {
@@ -86,6 +87,10 @@ namespace Smart_X.Client.Services
             if (!string.IsNullOrEmpty(_state.TopologySubnet)) query.Add($"subnet={Uri.EscapeDataString(_state.TopologySubnet)}");
             if (!string.IsNullOrEmpty(_state.TopologyRoot)) query.Add($"root={Uri.EscapeDataString(_state.TopologyRoot)}");
 
+            // Tell the API which version of this same view is already held, so an unchanged mesh costs no download or parse.
+            var key = $"{_state.TopologySubnet}|{_state.TopologyRoot}";
+            if (Topology is not null && key == _topologyKey) query.Add($"since={Topology.Version}");
+
             try
             {
                 using var response = await _http.GetAsync("api/Topology" + (query.Count > 0 ? "?" + string.Join('&', query) : ""));
@@ -99,7 +104,11 @@ namespace Smart_X.Client.Services
                 }
 
                 response.EnsureSuccessStatusCode();
-                Topology = await response.Content.ReadFromJsonAsync<TopologyResponse>();
+                if (response.StatusCode != System.Net.HttpStatusCode.NoContent)
+                {
+                    Topology = await response.Content.ReadFromJsonAsync<TopologyResponse>();
+                    _topologyKey = key;
+                }
                 TopologyError = null;
             }
             catch (Exception)
