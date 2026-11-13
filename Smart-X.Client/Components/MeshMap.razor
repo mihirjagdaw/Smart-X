@@ -100,6 +100,21 @@
 
     private string ViewBox => string.Create(CultureInfo.InvariantCulture, $"{_minX:0.##} {_minY:0.##} {_width:0.##} {_height:0.##}");
 
+    // The page re-fetches the mesh every two seconds and hands over a new object each time. Drawing thousands of
+    // SVG elements is the expensive part, so redraw only when what is shown has changed: the mesh version (which
+    // covers every node, link and status), the subnet, the root, the tracked device and its routes.
+    private string? _drawn;
+
+    protected override bool ShouldRender()
+    {
+        var key = string.Join('|', Data.Version, Data.Nodes.Count, Data.Links.Count, Data.Subnet, Data.Root, SelectedMac,
+            string.Join(',', Route?.Hops.Select(h => h.Id) ?? []), string.Join(',', Cheapest?.Hops.Select(h => h.Id) ?? []));
+        if (key == _drawn) return false;
+
+        _drawn = key;
+        return true;
+    }
+
     protected override void OnParametersSet()
     {
         _byId = Data.Nodes.ToDictionary(n => n.Id, StringComparer.OrdinalIgnoreCase);
